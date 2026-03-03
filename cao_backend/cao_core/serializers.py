@@ -117,7 +117,7 @@ class SketchSerializer(serializers.ModelSerializer):
             'geometry_count'
         ]
         read_only_fields = [
-            'id', 'project', 'created_at', 'updated_at', 'created_by'
+            'id', 'created_at', 'updated_at', 'created_by'
         ]
 
     def get_geometry_count(self, obj):
@@ -163,7 +163,7 @@ class GeometrySerializer(serializers.ModelSerializer):
             'children_count'
         ]
         read_only_fields = [
-            'id', 'project', 'created_at', 'updated_at', 'created_by',
+            'id', 'created_at', 'updated_at', 'created_by',
             'volume', 'bounding_box', 'is_valid', 'error_message'
         ]
 
@@ -217,7 +217,7 @@ class AssemblySerializer(serializers.ModelSerializer):
             'parts', 'parts_count'
         ]
         read_only_fields = [
-            'id', 'project', 'created_at', 'updated_at', 'created_by'
+            'id', 'created_at', 'updated_at', 'created_by'
         ]
 
     def get_parts_count(self, obj):

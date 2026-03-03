@@ -16,6 +16,11 @@ const loading = ref(false)
 const error = ref('')
 const showNewSketchForm = ref(false)
 const newSketchName = ref('')
+const showExtrudeForm = ref(false)
+const selectedSketchForExtrude = ref(null)
+const extrudeLength = ref(10)
+const extrudeSymmetric = ref(false)
+const extruding = ref(false)
 
 // Load project and its sketches/geometries
 const loadProject = async () => {
@@ -64,7 +69,7 @@ const createSketch = async () => {
 
 // Edit sketch
 const editSketch = (sketchId) => {
-  router.push(`/sketch/${sketchId}`)
+  router.push(`/sketch/${projectId.value}/${sketchId}`)
 }
 
 // View geometry
@@ -93,6 +98,43 @@ const deleteGeometry = async (geometryId) => {
     geometries.value = geometries.value.filter(g => g.id !== geometryId)
   } catch (err) {
     error.value = 'Failed to delete geometry'
+  }
+}
+
+// Extrude sketch to create 3D geometry
+const startExtrude = (sketchId) => {
+  selectedSketchForExtrude.value = sketchId
+  showExtrudeForm.value = true
+}
+
+const cancelExtrude = () => {
+  showExtrudeForm.value = false
+  selectedSketchForExtrude.value = null
+  extrudeLength.value = 10
+  extrudeSymmetric.value = false
+}
+
+const performExtrude = async () => {
+  if (!extrudeLength.value || extrudeLength.value <= 0) {
+    error.value = 'Extrude length must be greater than 0'
+    return
+  }
+
+  try {
+    extruding.value = true
+    error.value = ''
+    const geometry = await api.extrude(
+      projectId.value,
+      selectedSketchForExtrude.value,
+      extrudeLength.value,
+      extrudeSymmetric.value
+    )
+    geometries.value.push(geometry)
+    cancelExtrude()
+  } catch (err) {
+    error.value = err.response?.data?.detail || 'Failed to extrude sketch'
+  } finally {
+    extruding.value = false
   }
 }
 
@@ -172,6 +214,9 @@ onMounted(() => {
                 <button @click="editSketch(sketch.id)" class="btn-secondary">
                   Edit
                 </button>
+                <button @click="startExtrude(sketch.id)" class="btn-success">
+                  Extrude
+                </button>
                 <button @click="deleteSketch(sketch.id)" class="btn-danger">
                   Delete
                 </button>
@@ -181,6 +226,45 @@ onMounted(() => {
 
           <div v-else class="empty-state">
             <p>No sketches yet. Create one to get started!</p>
+          </div>
+        </div>
+
+        <!-- Extrude Form Modal -->
+        <div v-if="showExtrudeForm" class="modal-overlay" @click="cancelExtrude">
+          <div class="modal" @click.stop>
+            <div class="modal-header">
+              <h3>Extrude Sketch to 3D</h3>
+              <button @click="cancelExtrude" class="btn-close">×</button>
+            </div>
+            <div class="modal-body">
+              <div class="form-group">
+                <label for="extrude-length">Extrusion Length (mm)</label>
+                <input
+                  id="extrude-length"
+                  v-model.number="extrudeLength"
+                  type="number"
+                  min="0.1"
+                  step="1"
+                  placeholder="Enter extrusion length"
+                />
+              </div>
+              <div class="form-group">
+                <label>
+                  <input v-model="extrudeSymmetric" type="checkbox" />
+                  Symmetric (extrude both directions)
+                </label>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button @click="cancelExtrude" class="btn-secondary">Cancel</button>
+              <button 
+                @click="performExtrude" 
+                class="btn-primary"
+                :disabled="extruding"
+              >
+                {{ extruding ? 'Extruding...' : 'Extrude' }}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -473,6 +557,23 @@ onMounted(() => {
   background: #fecaca;
 }
 
+.btn-success {
+  background: #dcfce7;
+  color: #16a34a;
+  border: 1px solid #bbf7d0;
+}
+
+.btn-success:hover {
+  background: #bbf7d0;
+  border-color: #16a34a;
+}
+
+.btn-success:disabled {
+  background: #d1d5db;
+  color: #6b7280;
+  cursor: not-allowed;
+}
+
 .empty-state {
   text-align: center;
   padding: 3rem;
@@ -482,6 +583,112 @@ onMounted(() => {
 .empty-state p {
   margin: 0;
   font-size: 1rem;
+}
+
+/* Modal styles */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 20px 25px rgba(0, 0, 0, 0.15);
+  max-width: 400px;
+  width: 90%;
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid #e0e0e0;
+  background: #f9f9f9;
+}
+
+.modal-header h3 {
+  margin: 0;
+  color: #2c3e50;
+  font-size: 1.2rem;
+}
+
+.modal-header .btn-close {
+  background: none;
+  border: none;
+  color: #7f8c8d;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.modal-header .btn-close:hover {
+  color: #2c3e50;
+}
+
+.modal-body {
+  padding: 1.5rem;
+}
+
+.modal-body .form-group {
+  margin-bottom: 1rem;
+}
+
+.modal-body label {
+  display: block;
+  color: #2c3e50;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.modal-body input[type="number"],
+.modal-body input[type="text"] {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+.modal-body input[type="number"]:focus,
+.modal-body input[type="text"]:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.modal-body input[type="checkbox"] {
+  margin-right: 0.5rem;
+}
+
+.modal-footer {
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+  padding: 1.5rem;
+  border-top: 1px solid #e0e0e0;
+  background: #f9f9f9;
+}
+
+.modal-footer button {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
 }
 
 @media (max-width: 768px) {

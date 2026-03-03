@@ -24,6 +24,18 @@ const constraints = ref([])
 const tool = ref('select') // 'select', 'point', 'line', 'circle'
 const error = ref('')
 const success = ref('')
+const loading = ref(false)
+
+// Constraint state
+const selectedGeometry = ref(null) // Currently selected line/point for constraint {type, index}
+const showConstraintDialog = ref(false)
+const constraintType = ref('') // 'horizontal', 'vertical', 'distance', 'length'
+const constraintValue = ref(0)
+
+// Line drawing state
+const lineStartPoint = ref(null) // Index of start point for line drawing
+const circleStartPoint = ref(null) // Index of center point for circle
+const isDrawingCircle = ref(false)
 
 const pointRadius = 4
 const lineWidth = 2
@@ -88,14 +100,93 @@ const handleCanvasClick = (e) => {
   if (tool.value === 'point') {
     addPoint(pos.x, pos.y)
   } else if (tool.value === 'line') {
-    // TODO: implement line drawing with two clicks
+    handleLineClick(pos)
   } else if (tool.value === 'circle') {
-    // TODO: implement circle drawing
+    handleCircleClick(pos)
   }
 }
 
 const handleCanvasMouseMove = () => {
   // Could be used for preview of shapes being drawn
+}
+
+const handleLineClick = (pos) => {
+  // Find closest point to click
+  const clickRadius = 10
+  let closestPoint = null
+  let closestDist = clickRadius
+
+  points.value.forEach((p, i) => {
+    const dist = Math.sqrt((p.x - pos.x) ** 2 + (p.y - pos.y) ** 2)
+    if (dist < closestDist) {
+      closestDist = dist
+      closestPoint = i
+    }
+  })
+
+  if (closestPoint === null) {
+    // Create new point if no point nearby
+    addPoint(pos.x, pos.y)
+    closestPoint = points.value.length - 1
+  }
+
+  if (lineStartPoint.value === null) {
+    lineStartPoint.value = closestPoint
+    success.value = `Line start: Point ${closestPoint}`
+  } else if (lineStartPoint.value !== closestPoint) {
+    // Add line between two points
+    const lineId = `line_${Date.now()}`
+    lines.value.push({
+      start: lineStartPoint.value,
+      end: closestPoint,
+      id: lineId,
+    })
+    success.value = `Line added: Point ${lineStartPoint.value} to Point ${closestPoint}`
+    lineStartPoint.value = null
+    redrawCanvas()
+  }
+}
+
+const handleCircleClick = (pos) => {
+  if (!isDrawingCircle.value) {
+    // First click: select center point
+    const clickRadius = 10
+    let closestPoint = null
+    let closestDist = clickRadius
+
+    points.value.forEach((p, i) => {
+      const dist = Math.sqrt((p.x - pos.x) ** 2 + (p.y - pos.y) ** 2)
+      if (dist < closestDist) {
+        closestDist = dist
+        closestPoint = i
+      }
+    })
+
+    if (closestPoint === null) {
+      addPoint(pos.x, pos.y)
+      closestPoint = points.value.length - 1
+    }
+
+    circleStartPoint.value = closestPoint
+    isDrawingCircle.value = true
+    success.value = `Circle center: Point ${closestPoint} - Click to set radius`
+  } else {
+    // Second click: set radius and complete circle
+    const center = points.value[circleStartPoint.value]
+    const radius = Math.sqrt((center.x - pos.x) ** 2 + (center.y - pos.y) ** 2)
+
+    const circleId = `circle_${Date.now()}`
+    circles.value.push({
+      center: circleStartPoint.value,
+      radius,
+      id: circleId,
+    })
+
+    success.value = `Circle added: Center Point ${circleStartPoint.value}, Radius ${radius.toFixed(2)}`
+    circleStartPoint.value = null
+    isDrawingCircle.value = false
+    redrawCanvas()
+  }
 }
 
 const addPoint = (x, y) => {
@@ -218,15 +309,47 @@ const clearSketch = () => {
   }
 }
 
-const exportSketch = () => {
-  const data = {
-    points: points.value,
-    lines: lines.value,
-    circles: circles.value,
-    constraints: constraints.value,
+const exportSketch = async () => {
+  error.value = ''
+  success.value = ''
+
+  if (points.value.length === 0) {
+    error.value = 'Sketch is empty. Add some geometry.'
+    return
   }
-  console.log('Sketch data:', data)
-  // TODO: Save to backend
+
+  loading.value = true
+
+  try {
+    // Format data for backend
+    const sketchData = {
+      name: `Sketch ${new Date().toLocaleString()}`,
+      geometry_data: {
+        points: points.value.map(p => ({ x: p.x, y: p.y })),
+        lines: lines.value.map(l => ({ start: l.start, end: l.end })),
+      },
+    }
+
+    if (sketchId.value) {
+      // Update existing sketch
+      await api.updateSketch(sketchId.value, sketchData)
+      success.value = 'Sketch saved successfully!'
+    } else {
+      // Create new sketch
+      const response = await api.createSketch(route.params.projectId, sketchData)
+      sketchId.value = response.id
+      success.value = 'Sketch created successfully! ID: ' + response.id
+    }
+
+    setTimeout(() => {
+      router.push(`/project/${route.params.projectId}`)
+    }, 1500)
+  } catch (err) {
+    error.value = err.response?.data?.detail || 'Failed to save sketch'
+    console.error(err)
+  } finally {
+    loading.value = false
+  }
 }
 
 const goBack = () => {
@@ -235,8 +358,43 @@ const goBack = () => {
 
 onMounted(() => {
   initializeCanvas()
-  // TODO: Load sketch from backend if sketchId exists
+  
+  // Load sketch from backend if sketchId exists
+  if (sketchId.value) {
+    loadSketch()
+  }
 })
+
+const loadSketch = async () => {
+  loading.value = true
+  error.value = ''
+  
+  try {
+    const response = await api.getSketch(sketchId.value)
+    sketch.value = response
+    
+    // Load geometry data
+    if (response.geometry_data) {
+      const data = response.geometry_data
+      points.value = (data.points || []).map((p, i) => ({
+        ...p,
+        id: `point_${i}`,
+      }))
+      lines.value = (data.lines || []).map((l, i) => ({
+        ...l,
+        id: `line_${i}`,
+      }))
+    }
+    
+    redrawCanvas()
+    success.value = 'Sketch loaded successfully!'
+  } catch (err) {
+    error.value = err.response?.data?.detail || 'Failed to load sketch'
+    console.error(err)
+  } finally {
+    loading.value = false
+  }
+}
 </script>
 
 <template>
@@ -309,13 +467,13 @@ onMounted(() => {
 
         <div class="tool-group">
           <h3>Actions</h3>
-          <button class="tool-btn btn-primary" @click="solveConstraints">
+          <button class="tool-btn btn-primary" @click="solveConstraints" :disabled="loading">
             Solve
           </button>
-          <button class="tool-btn btn-secondary" @click="exportSketch">
-            Export
+          <button class="tool-btn btn-secondary" @click="exportSketch" :disabled="loading || points.length === 0">
+            {{ loading ? 'Saving...' : 'Save Sketch' }}
           </button>
-          <button class="tool-btn btn-danger" @click="clearSketch">
+          <button class="tool-btn btn-danger" @click="clearSketch" :disabled="loading">
             Clear
           </button>
         </div>

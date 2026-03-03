@@ -38,7 +38,9 @@ class CadQueryBridge:
     ) -> Tuple[bool, Optional[cq.Workplane], str]:
         """
         Create a CadQuery workplane from sketch data
-        sketch_data: {'points': {...}, 'lines': {...}, ...}
+        sketch_data: {'points': [...], 'lines': [...], ...}
+        Lines format: [{'start': 0, 'end': 1}, ...]
+        Points format: [{'x': 0, 'y': 0}, ...]
         Returns: (success, workplane, error_message)
         """
         try:
@@ -49,28 +51,46 @@ class CadQueryBridge:
                 return False, None, "No lines in sketch"
 
             lines = sketch_data['lines']
-            if not lines:
+            points_data = sketch_data.get('points', [])
+            
+            if not lines or not points_data:
                 return False, None, "Sketch has no geometry"
 
-            # Extract points and create polyline
-            points = []
-            for line_name, line_data in lines.items():
-                start = line_data['start']
-                end = line_data['end']
-                points.append((start['x'], start['y']))
+            # Create a mapping of point indices to coordinates
+            points_map = {}
+            for idx, point in enumerate(points_data):
+                if isinstance(point, dict) and 'x' in point and 'y' in point:
+                    points_map[idx] = (point['x'], point['y'])
 
-            # Remove duplicates and close the profile
-            if points:
+            # Extract points from lines (assuming lines form a closed loop)
+            extracted_points = []
+            
+            # Handle list-based lines format (new format from frontend)
+            if isinstance(lines, list):
+                for line in lines:
+                    if isinstance(line, dict) and 'start' in line:
+                        start_idx = line['start']
+                        if start_idx in points_map:
+                            extracted_points.append(points_map[start_idx])
+            # Handle dict-based lines format (legacy/fallback)
+            else:
+                for line_name, line_data in lines.items():
+                    start = line_data['start']
+                    end = line_data['end']
+                    extracted_points.append((start['x'], start['y']))
+
+            # Remove duplicates while preserving order
+            if extracted_points:
                 unique_points = []
-                for p in points:
+                for p in extracted_points:
                     if not unique_points or p != unique_points[-1]:
                         unique_points.append(p)
 
-                # Check if closed
+                # Check if closed and close if necessary
                 if unique_points and unique_points[0] != unique_points[-1]:
                     unique_points.append(unique_points[0])
 
-                # Create polyline
+                # Create polyline (need at least 3 points for a valid face)
                 if len(unique_points) >= 3:
                     wp = wp.polyline(unique_points)
                     wp = wp.close()
@@ -237,7 +257,11 @@ class CadQueryBridge:
             try:
                 val = solid.val()
                 if hasattr(val, 'Volume'):
-                    properties['volume'] = val.Volume
+                    # Volume is a property, call it if it's callable
+                    volume_value = val.Volume
+                    if callable(volume_value):
+                        volume_value = volume_value()
+                    properties['volume'] = volume_value
                     properties['volume_unit'] = 'mm³'
             except:
                 properties['volume'] = None
@@ -320,6 +344,131 @@ class CadQueryBridge:
 
         except Exception as e:
             error = f"STL export failed: {str(e)}"
+            self.error_log.append(error)
+            return False, None, error
+
+    def load_step(
+        self,
+        filepath: str
+    ) -> Tuple[bool, Optional[cq.Workplane], str]:
+        """
+        Load a STEP file and convert to CadQuery workplane
+        Returns: (success, workplane, error_message)
+        """
+        try:
+            if not os.path.exists(filepath):
+                return False, None, f"STEP file not found: {filepath}"
+            
+            # Import the STEP file
+            wp = cq.importers.importStep(filepath)
+            
+            if wp is None:
+                return False, None, "Failed to import STEP file"
+            
+            self.last_solid = wp
+            return True, wp, f"STEP file loaded successfully from {filepath}"
+        
+        except Exception as e:
+            error = f"Failed to load STEP file: {str(e)}"
+            self.error_log.append(error)
+            return False, None, error
+
+    def pad(
+        self,
+        workplane: cq.Workplane,
+        face_index: int,
+        length: float,
+        direction: str = 'normal'
+    ) -> Tuple[bool, Optional[cq.Workplane], str]:
+        """
+        Create a pad (additive feature) on an existing geometry
+        For 3D solids, we apply a simple translation and union
+        Returns: (success, solid, error_message)
+        """
+        try:
+            if workplane is None:
+                return False, None, "No workplane provided"
+            
+            # Validate length
+            if length <= 0:
+                return False, None, "Pad length must be positive"
+            
+            if length > 1000:  # Sanity check
+                return False, None, "Pad length is too large (>1000)"
+            
+            # For a 3D solid, we can't extrude a face directly.
+            # Instead, we'll use a simple offset operation
+            # This moves the solid in the Z direction and creates a union
+            try:
+                # Simple approach: translate the solid upward and union
+                solid_val = workplane.val()
+                
+                # Create a box to add to the solid at the top
+                # Get bounding box
+                bbox = solid_val.BoundingBox()
+                
+                # Create a new box on top
+                top_face_z = bbox.zmax
+                box_solid = cq.Workplane("XY").box(
+                    bbox.xmax - bbox.xmin,
+                    bbox.ymax - bbox.ymin,
+                    length,
+                    centered=False
+                ).translate((bbox.xmin, bbox.ymin, top_face_z))
+                
+                # Union the box with the existing solid
+                pad_solid = cq.Workplane().add(workplane).union(box_solid)
+            except Exception as inner_e:
+                # Fallback: just translate and return
+                # This is a simplified version
+                return False, None, f"Pad offset failed: {str(inner_e)}"
+            
+            self.last_solid = pad_solid
+            return True, pad_solid, f"Pad of {length}mm created successfully"
+        
+        except Exception as e:
+            error = f"Pad operation failed: {str(e)}"
+            self.error_log.append(error)
+            return False, None, error
+
+    def hole(
+        self,
+        workplane: cq.Workplane,
+        face_index: int,
+        radius: float,
+        depth: float
+    ) -> Tuple[bool, Optional[cq.Workplane], str]:
+        """
+        Create a hole (circular pocket) on a face
+        Returns: (success, solid, error_message)
+        """
+        try:
+            if workplane is None:
+                return False, None, "No workplane provided"
+            
+            # Validate parameters
+            if radius <= 0:
+                return False, None, "Hole radius must be positive"
+            
+            if depth <= 0:
+                return False, None, "Hole depth must be positive"
+            
+            if depth > 1000:
+                return False, None, "Hole depth is too large (>1000)"
+            
+            # Create a hole by selecting the top face and cutting
+            try:
+                # Select the top face and create a hole
+                hole_solid = workplane.faces(">Z").workplane().circle(radius).cutBlind(-depth)
+            except:
+                # Fallback: simpler hole creation if face selection fails
+                hole_solid = workplane.circle(radius).cutBlind(-depth)
+            
+            self.last_solid = hole_solid
+            return True, hole_solid, f"Hole of radius {radius}mm and depth {depth}mm created successfully"
+        
+        except Exception as e:
+            error = f"Hole operation failed: {str(e)}"
             self.error_log.append(error)
             return False, None, error
 

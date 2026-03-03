@@ -14,7 +14,10 @@ from django.contrib.auth.models import User
 from rest_framework_simplejwt.tokens import RefreshToken
 from cao_core.models import Project, Sketch, Geometry, Assembly, EventStore
 from cao_core.services import EventStoreService
-from cao_core.serializers import UserSerializer
+from cao_core.serializers import (
+    UserSerializer, ProjectSerializer, SketchSerializer, 
+    GeometrySerializer, AssemblySerializer
+)
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
@@ -23,6 +26,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
     Only owners can view/edit their projects
     """
     queryset = Project.objects.all()
+    serializer_class = ProjectSerializer
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
@@ -37,6 +41,7 @@ class SketchViewSet(viewsets.ModelViewSet):
     CRUD operations for Sketches
     """
     queryset = Sketch.objects.all()
+    serializer_class = SketchSerializer
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
@@ -51,6 +56,7 @@ class GeometryViewSet(viewsets.ModelViewSet):
     CRUD operations for Geometries
     """
     queryset = Geometry.objects.all()
+    serializer_class = GeometrySerializer
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
@@ -58,6 +64,29 @@ class GeometryViewSet(viewsets.ModelViewSet):
         if project_id:
             return Geometry.objects.filter(project_id=project_id)
         return Geometry.objects.none()
+    
+    @action(detail=True, methods=['get'])
+    def step_file(self, request, pk=None):
+        """
+        Download STEP file for a geometry
+        """
+        geometry = self.get_object()
+        if not geometry.step_file:
+            return Response(
+                {'error': 'No STEP file available for this geometry'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Return file content
+        try:
+            with open(geometry.step_file.path, 'rb') as f:
+                from django.http import FileResponse
+                return FileResponse(f, content_type='application/step')
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to read STEP file: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class AssemblyViewSet(viewsets.ModelViewSet):
@@ -65,6 +94,7 @@ class AssemblyViewSet(viewsets.ModelViewSet):
     CRUD operations for Assemblies
     """
     queryset = Assembly.objects.all()
+    serializer_class = AssemblySerializer
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):

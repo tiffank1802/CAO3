@@ -59,6 +59,12 @@ class APIService {
     })
     if (response.data.access) {
       this.setAuthToken(response.data.access)
+      // Fetch user info after setting token
+      const userResponse = await this.client.get('/auth/me/')
+      return {
+        ...response.data,
+        user: userResponse.data
+      }
     }
     return response.data
   }
@@ -112,7 +118,7 @@ class APIService {
   // ============================================================================
 
   async getSketches(projectId) {
-    const response = await this.client.get(`/sketches/?project=${projectId}`)
+    const response = await this.client.get(`/sketches/?project_id=${projectId}`)
     return response.data
   }
 
@@ -162,7 +168,7 @@ class APIService {
   // ============================================================================
 
   async getGeometries(projectId) {
-    const response = await this.client.get(`/geometries/?project=${projectId}`)
+    const response = await this.client.get(`/geometries/?project_id=${projectId}`)
     return response.data
   }
 
@@ -191,6 +197,45 @@ class APIService {
     return response.data
   }
 
+  async fillet(projectId, geometryId, radius) {
+    const response = await this.client.post('/operations/fillet/', {
+      project_id: projectId,
+      geometry_id: geometryId,
+      radius: radius,
+    })
+    return response.data
+  }
+
+  async chamfer(projectId, geometryId, size) {
+    const response = await this.client.post('/operations/chamfer/', {
+      project_id: projectId,
+      geometry_id: geometryId,
+      size: size,
+    })
+    return response.data
+  }
+
+  async pad(projectId, geometryId, length, faceIndex = 0) {
+    const response = await this.client.post('/operations/pad/', {
+      project_id: projectId,
+      geometry_id: geometryId,
+      length: length,
+      face_index: faceIndex,
+    })
+    return response.data
+  }
+
+  async hole(projectId, geometryId, radius, depth, faceIndex = 0) {
+    const response = await this.client.post('/operations/hole/', {
+      project_id: projectId,
+      geometry_id: geometryId,
+      radius: radius,
+      depth: depth,
+      face_index: faceIndex,
+    })
+    return response.data
+  }
+
   async getSTEPFile(geometryId) {
     const response = await this.client.get(
       `/geometries/${geometryId}/step/`,
@@ -205,6 +250,16 @@ class APIService {
       { responseType: 'blob' }
     )
     return response.data
+  }
+
+  async exportGeometry(geometryId, format) {
+    if (format.toUpperCase() === 'STEP') {
+      return this.getSTEPFile(geometryId)
+    } else if (format.toUpperCase() === 'STL') {
+      return this.getSTLFile(geometryId)
+    } else {
+      throw new Error(`Unsupported format: ${format}`)
+    }
   }
 
   // ============================================================================
