@@ -53,7 +53,7 @@ class APIService {
   // ============================================================================
 
   async login(username, password) {
-    const response = await this.client.post('/auth/login/', {
+    const response = await this.client.post('/auth/token/', {
       username,
       password,
     })
@@ -68,7 +68,11 @@ class APIService {
   }
 
   async register(userData) {
-    return this.client.post('/auth/register/', userData)
+    const response = await this.client.post('/auth/register/', userData)
+    if (response.data.access) {
+      this.setAuthToken(response.data.access)
+    }
+    return response.data
   }
 
   async getCurrentUser() {
