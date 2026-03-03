@@ -29,8 +29,10 @@ const loading = ref(false)
 // Constraint state
 const selectedGeometry = ref(null) // Currently selected line/point for constraint {type, index}
 const showConstraintDialog = ref(false)
-const constraintType = ref('') // 'horizontal', 'vertical', 'distance', 'length'
+const constraintType = ref('') // 'horizontal', 'vertical', 'distance', 'length', 'equal_length', 'angle', 'symmetry', 'tangent', 'on_line'
 const constraintValue = ref(0)
+const secondGeometry = ref(null) // For constraints requiring 2 geometries
+const showConstraintPanel = ref(true)
 
 // Line drawing state
 const lineStartPoint = ref(null) // Index of start point for line drawing
@@ -93,17 +95,188 @@ const drawGrid = () => {
 }
 
 const handleCanvasClick = (e) => {
-  if (!stage.value || !layer.value) return
+   if (!stage.value || !layer.value) return
 
-  const pos = stage.value.getPointerPosition()
+   const pos = stage.value.getPointerPosition()
 
-  if (tool.value === 'point') {
-    addPoint(pos.x, pos.y)
-  } else if (tool.value === 'line') {
-    handleLineClick(pos)
-  } else if (tool.value === 'circle') {
-    handleCircleClick(pos)
+   // If constraint dialog is open, allow selecting second geometry
+   if (showConstraintDialog.value && constraintType.value) {
+     const clickRadius = 10
+
+     if (constraintType.value === 'equal_length') {
+       // Looking for second line
+       for (let i = 0; i < lines.value.length; i++) {
+         const line = lines.value[i]
+         const start = points.value[line.start]
+         const end = points.value[line.end]
+         
+         if (start && end && i !== selectedGeometry.value?.index) {
+           const dist = distancePointToLine(pos, start, end)
+           if (dist < clickRadius) {
+             secondGeometry.value = { type: 'line', index: i }
+             success.value = `Selected second line ${i}`
+             redrawCanvas()
+             return
+           }
+         }
+       }
+     } else if (constraintType.value === 'symmetry') {
+       // Looking for second point
+       for (let i = 0; i < points.value.length; i++) {
+         const p = points.value[i]
+         const dist = Math.sqrt((p.x - pos.x) ** 2 + (p.y - pos.y) ** 2)
+         if (dist < clickRadius && i !== selectedGeometry.value?.index) {
+           secondGeometry.value = { type: 'point', index: i }
+           success.value = `Selected second point ${i}`
+           redrawCanvas()
+           return
+         }
+       }
+     } else if (constraintType.value === 'tangent') {
+       // Looking for circle if line was selected, or line if circle was selected
+       if (selectedGeometry.value?.type === 'line') {
+         // Looking for circle
+         for (let i = 0; i < circles.value.length; i++) {
+           const circle = circles.value[i]
+           const center = points.value[circle.center]
+           if (center) {
+             const dist = Math.sqrt((center.x - pos.x) ** 2 + (center.y - pos.y) ** 2)
+             if (Math.abs(dist - circle.radius) < clickRadius) {
+               secondGeometry.value = { type: 'circle', index: i }
+               success.value = `Selected circle ${i}`
+               redrawCanvas()
+               return
+             }
+           }
+         }
+       } else if (selectedGeometry.value?.type === 'circle') {
+         // Looking for line
+         for (let i = 0; i < lines.value.length; i++) {
+           const line = lines.value[i]
+           const start = points.value[line.start]
+           const end = points.value[line.end]
+           
+           if (start && end) {
+             const dist = distancePointToLine(pos, start, end)
+             if (dist < clickRadius) {
+               secondGeometry.value = { type: 'line', index: i }
+               success.value = `Selected line ${i}`
+               redrawCanvas()
+               return
+             }
+           }
+         }
+       }
+     } else if (constraintType.value === 'on_line') {
+       // Looking for line
+       for (let i = 0; i < lines.value.length; i++) {
+         const line = lines.value[i]
+         const start = points.value[line.start]
+         const end = points.value[line.end]
+         
+         if (start && end) {
+           const dist = distancePointToLine(pos, start, end)
+           if (dist < clickRadius) {
+             secondGeometry.value = { type: 'line', index: i }
+             success.value = `Selected line ${i}`
+             redrawCanvas()
+             return
+           }
+         }
+       }
+     }
+     return
+   }
+
+   if (tool.value === 'select') {
+     // Handle geometry selection for constraints
+     const clickRadius = 10
+
+     // Check if clicking on a line
+     for (let i = 0; i < lines.value.length; i++) {
+       const line = lines.value[i]
+       const start = points.value[line.start]
+       const end = points.value[line.end]
+       
+       if (start && end) {
+         // Calculate distance from point to line
+         const dist = distancePointToLine(pos, start, end)
+         if (dist < clickRadius) {
+           selectedGeometry.value = { type: 'line', index: i }
+           success.value = `Selected line ${i}`
+           redrawCanvas()
+           return
+         }
+       }
+     }
+
+     // Check if clicking on a point
+     for (let i = 0; i < points.value.length; i++) {
+       const p = points.value[i]
+       const dist = Math.sqrt((p.x - pos.x) ** 2 + (p.y - pos.y) ** 2)
+       if (dist < clickRadius) {
+         selectedGeometry.value = { type: 'point', index: i, x: p.x, y: p.y }
+         success.value = `Selected point ${i}`
+         redrawCanvas()
+         return
+       }
+     }
+
+     // Check if clicking on a circle
+     for (let i = 0; i < circles.value.length; i++) {
+       const circle = circles.value[i]
+       const center = points.value[circle.center]
+       if (center) {
+         const dist = Math.sqrt((center.x - pos.x) ** 2 + (center.y - pos.y) ** 2)
+         // Check if clicked on circle perimeter
+         if (Math.abs(dist - circle.radius) < clickRadius) {
+           selectedGeometry.value = { type: 'circle', index: i }
+           success.value = `Selected circle ${i}`
+           redrawCanvas()
+           return
+         }
+       }
+     }
+
+     selectedGeometry.value = null
+     redrawCanvas()
+   } else if (tool.value === 'point') {
+     addPoint(pos.x, pos.y)
+   } else if (tool.value === 'line') {
+     handleLineClick(pos)
+   } else if (tool.value === 'circle') {
+     handleCircleClick(pos)
+   }
+ }
+
+const distancePointToLine = (point, lineStart, lineEnd) => {
+  const A = point.x - lineStart.x
+  const B = point.y - lineStart.y
+  const C = lineEnd.x - lineStart.x
+  const D = lineEnd.y - lineStart.y
+
+  const dot = A * C + B * D
+  const lenSq = C * C + D * D
+
+  let param = -1
+  if (lenSq !== 0) param = dot / lenSq
+
+  let xx, yy
+
+  if (param < 0) {
+    xx = lineStart.x
+    yy = lineStart.y
+  } else if (param > 1) {
+    xx = lineEnd.x
+    yy = lineEnd.y
+  } else {
+    xx = lineStart.x + param * C
+    yy = lineStart.y + param * D
   }
+
+  const dx = point.x - xx
+  const dy = point.y - yy
+  return Math.sqrt(dx * dx + dy * dy)
 }
 
 const handleCanvasMouseMove = () => {
@@ -209,6 +382,199 @@ const addPoint = (x, y) => {
   layer.value.draw()
 }
 
+const addConstraint = (type) => {
+   error.value = ''
+   success.value = ''
+
+   if (type === 'horizontal' || type === 'vertical') {
+     // For horizontal/vertical, need a selected line
+     const selectedLine = lines.value.findIndex(l => 
+       selectedGeometry.value?.type === 'line' && selectedGeometry.value?.index === lines.value.indexOf(l)
+     )
+     
+     if (selectedLine === -1 && selectedGeometry.value?.type !== 'line') {
+       error.value = `Select a line to apply ${type} constraint`
+       return
+     }
+
+     const lineIdx = selectedGeometry.value?.type === 'line' ? selectedGeometry.value.index : selectedLine
+     const constraint = {
+       type,
+       line_name: `line_${lineIdx}`
+     }
+
+     constraints.value.push(constraint)
+     success.value = `${type} constraint added to line ${lineIdx}`
+     selectedGeometry.value = null
+   } else if (type === 'distance' || type === 'length') {
+     constraintType.value = type
+     showConstraintDialog.value = true
+   } else if (type === 'equal_length') {
+     // For equal_length, need 2 lines selected
+     if (!selectedGeometry.value || selectedGeometry.value.type !== 'line') {
+       error.value = 'Select first line for equal_length constraint'
+       return
+     }
+     constraintType.value = 'equal_length'
+     secondGeometry.value = null
+     showConstraintDialog.value = true
+   } else if (type === 'angle') {
+     if (!selectedGeometry.value || selectedGeometry.value.type !== 'line') {
+       error.value = 'Select a line to apply angle constraint'
+       return
+     }
+     constraintType.value = 'angle'
+     showConstraintDialog.value = true
+   } else if (type === 'symmetry') {
+     if (!selectedGeometry.value || selectedGeometry.value.type !== 'point') {
+       error.value = 'Select first point for symmetry constraint'
+       return
+     }
+     constraintType.value = 'symmetry'
+     secondGeometry.value = null
+     showConstraintDialog.value = true
+   } else if (type === 'tangent') {
+     if (!selectedGeometry.value) {
+       error.value = 'Select a line and circle for tangent constraint'
+       return
+     }
+     constraintType.value = 'tangent'
+     secondGeometry.value = null
+     showConstraintDialog.value = true
+   } else if (type === 'on_line') {
+     if (!selectedGeometry.value || selectedGeometry.value.type !== 'point') {
+       error.value = 'Select a point for on_line constraint'
+       return
+     }
+     constraintType.value = 'on_line'
+     secondGeometry.value = null
+     showConstraintDialog.value = true
+   }
+
+   redrawCanvas()
+ }
+
+const deleteConstraint = (index) => {
+   if (confirm('Delete this constraint?')) {
+     constraints.value.splice(index, 1)
+     success.value = 'Constraint deleted'
+   }
+ }
+
+const confirmConstraintValue = () => {
+   error.value = ''
+
+   if (constraintType.value === 'equal_length') {
+     if (!secondGeometry.value || secondGeometry.value.type !== 'line') {
+       error.value = 'Must select two lines for equal_length constraint'
+       return
+     }
+     const constraint = {
+       type: 'equal_length',
+       line1: `line_${selectedGeometry.value.index}`,
+       line2: `line_${secondGeometry.value.index}`
+     }
+     constraints.value.push(constraint)
+     success.value = 'equal_length constraint added'
+   } else if (constraintType.value === 'angle') {
+     if (constraintValue.value < 0 || constraintValue.value > 360) {
+       error.value = 'Angle must be between 0 and 360 degrees'
+       return
+     }
+     const constraint = {
+       type: 'angle',
+       line_name: `line_${selectedGeometry.value.index}`,
+       angle: parseFloat(constraintValue.value)
+     }
+     constraints.value.push(constraint)
+     success.value = `angle constraint added: ${constraintValue.value}°`
+   } else if (constraintType.value === 'symmetry') {
+     if (!secondGeometry.value || secondGeometry.value.type !== 'point') {
+       error.value = 'Must select two points for symmetry constraint'
+       return
+     }
+     const axisType = prompt('Axis type (vertical/horizontal/origin)?', 'vertical')
+     if (!axisType || !['vertical', 'horizontal', 'origin'].includes(axisType)) {
+       error.value = 'Invalid axis type'
+       return
+     }
+     const constraint = {
+       type: 'symmetry',
+       point1: `point_${selectedGeometry.value.index}`,
+       point2: `point_${secondGeometry.value.index}`,
+       axis_type: axisType
+     }
+     constraints.value.push(constraint)
+     success.value = `symmetry constraint added (${axisType})`
+   } else if (constraintType.value === 'tangent') {
+     if (!secondGeometry.value) {
+       error.value = 'Must select a line and circle for tangent constraint'
+       return
+     }
+     let lineIdx, circleIdx
+     if (selectedGeometry.value.type === 'line') {
+       lineIdx = selectedGeometry.value.index
+       if (secondGeometry.value.type !== 'circle') {
+         error.value = 'Second geometry must be a circle'
+         return
+       }
+       circleIdx = secondGeometry.value.index
+     } else {
+       error.value = 'First geometry must be a line'
+       return
+     }
+     const constraint = {
+       type: 'tangent',
+       line_name: `line_${lineIdx}`,
+       circle_name: `circle_${circleIdx}`
+     }
+     constraints.value.push(constraint)
+     success.value = 'tangent constraint added'
+   } else if (constraintType.value === 'on_line') {
+     if (!secondGeometry.value || secondGeometry.value.type !== 'line') {
+       error.value = 'Must select a point and line for on_line constraint'
+       return
+     }
+     const constraint = {
+       type: 'on_line',
+       point_name: `point_${selectedGeometry.value.index}`,
+       line_name: `line_${secondGeometry.value.index}`
+     }
+     constraints.value.push(constraint)
+     success.value = 'on_line constraint added'
+   } else if (constraintValue.value <= 0) {
+     error.value = 'Constraint value must be positive'
+     return
+   } else {
+     const constraint = {
+       type: constraintType.value,
+       value: parseFloat(constraintValue.value)
+     }
+
+     if (constraintType.value === 'length' && selectedGeometry.value?.type === 'line') {
+       constraint.line_name = `line_${selectedGeometry.value.index}`
+     } else if (constraintType.value === 'distance' && selectedGeometry.value?.type === 'point') {
+       constraint.point = `point_${selectedGeometry.value.index}`
+       constraint.x = selectedGeometry.value.x || 0
+       constraint.y = selectedGeometry.value.y || 0
+     } else {
+       error.value = 'Invalid selection for this constraint type'
+       return
+     }
+
+     constraints.value.push(constraint)
+     success.value = `${constraintType.value} constraint added with value ${constraintValue.value}`
+   }
+
+   showConstraintDialog.value = false
+   constraintValue.value = 0
+   constraintType.value = ''
+   selectedGeometry.value = null
+   secondGeometry.value = null
+   
+   redrawCanvas()
+ }
+
 const solveConstraints = async () => {
   error.value = ''
   success.value = ''
@@ -251,29 +617,32 @@ const redrawCanvas = () => {
   drawGrid()
 
   // Redraw points
-  points.value.forEach(p => {
+  points.value.forEach((p, i) => {
+    const isSelected = selectedGeometry.value?.type === 'point' && selectedGeometry.value?.index === i
     layer.value.add(
       new Konva.Circle({
         x: p.x,
         y: p.y,
         radius: pointRadius,
-        fill: '#667eea',
-        stroke: '#4c51bf',
-        strokeWidth: 1,
+        fill: isSelected ? '#ff6b6b' : '#667eea',
+        stroke: isSelected ? '#c92a2a' : '#4c51bf',
+        strokeWidth: isSelected ? 2 : 1,
       })
     )
   })
 
   // Redraw lines
-  lines.value.forEach(line => {
+  lines.value.forEach((line, i) => {
     const start = points.value[line.start]
     const end = points.value[line.end]
+    const isSelected = selectedGeometry.value?.type === 'line' && selectedGeometry.value?.index === i
+    
     if (start && end) {
       layer.value.add(
         new Konva.Line({
           points: [start.x, start.y, end.x, end.y],
-          stroke: '#764ba2',
-          strokeWidth: lineWidth,
+          stroke: isSelected ? '#ff6b6b' : '#764ba2',
+          strokeWidth: isSelected ? 3 : lineWidth,
         })
       )
     }
@@ -453,17 +822,71 @@ const loadSketch = async () => {
         </div>
 
         <div class="tool-group">
-          <h3>Constraints</h3>
-          <button class="tool-btn" disabled title="Coming soon">
-            Horizontal
-          </button>
-          <button class="tool-btn" disabled title="Coming soon">
-            Vertical
-          </button>
-          <button class="tool-btn" disabled title="Coming soon">
-            Distance
-          </button>
-        </div>
+           <h3>Constraints</h3>
+           <button 
+             class="tool-btn" 
+             @click="addConstraint('horizontal')"
+             :disabled="!selectedGeometry || selectedGeometry.type !== 'line'"
+             title="Constrain selected line to be horizontal"
+           >
+             ⟷ Horizontal
+           </button>
+           <button 
+             class="tool-btn" 
+             @click="addConstraint('vertical')"
+             :disabled="!selectedGeometry || selectedGeometry.type !== 'line'"
+             title="Constrain selected line to be vertical"
+           >
+             ⟨ Vertical
+           </button>
+           <button 
+             class="tool-btn" 
+             @click="addConstraint('length')"
+             :disabled="!selectedGeometry || selectedGeometry.type !== 'line'"
+             title="Set length constraint for selected line"
+           >
+             ⏺ Length
+           </button>
+           <button 
+             class="tool-btn" 
+             @click="addConstraint('equal_length')"
+             :disabled="!selectedGeometry || selectedGeometry.type !== 'line'"
+             title="Make two lines equal length"
+           >
+             ⟹ Equal Len
+           </button>
+           <button 
+             class="tool-btn" 
+             @click="addConstraint('angle')"
+             :disabled="!selectedGeometry || selectedGeometry.type !== 'line'"
+             title="Constrain line to specific angle"
+           >
+             ∠ Angle
+           </button>
+           <button 
+             class="tool-btn" 
+             @click="addConstraint('symmetry')"
+             :disabled="!selectedGeometry || selectedGeometry.type !== 'point'"
+             title="Make two points symmetric"
+           >
+             ⇄ Symmetry
+           </button>
+           <button 
+             class="tool-btn" 
+             @click="addConstraint('tangent')"
+             title="Constrain line tangent to circle"
+           >
+             ⌢ Tangent
+           </button>
+           <button 
+             class="tool-btn" 
+             @click="addConstraint('on_line')"
+             :disabled="!selectedGeometry || selectedGeometry.type !== 'point'"
+             title="Constrain point to lie on line"
+           >
+             ⊙ On Line
+           </button>
+         </div>
 
         <div class="tool-group">
           <h3>Actions</h3>
@@ -488,24 +911,127 @@ const loadSketch = async () => {
         <!-- Canvas -->
         <div ref="canvas" class="konva-canvas"></div>
 
-        <!-- Properties panel (placeholder) -->
-        <div class="properties-panel">
-          <h3>Properties</h3>
-          <div class="property">
-            <label>Elements:</label>
-            <span>{{ totalElements }}</span>
-          </div>
-          <div class="property">
-            <label>Tool:</label>
-            <span>{{ tool }}</span>
-          </div>
-          <div class="property">
-            <label>Constraints:</label>
-            <span>{{ constraints.length }}</span>
-          </div>
-        </div>
+         <!-- Properties panel (placeholder) -->
+         <div class="properties-panel">
+           <h3>Properties</h3>
+           <div class="property">
+             <label>Elements:</label>
+             <span>{{ totalElements }}</span>
+           </div>
+           <div class="property">
+             <label>Tool:</label>
+             <span>{{ tool }}</span>
+           </div>
+           <div class="property">
+             <label>Constraints:</label>
+             <span>{{ constraints.length }}</span>
+           </div>
+         </div>
+
+         <!-- Constraints List Panel -->
+         <div v-if="showConstraintPanel" class="constraints-panel">
+           <div class="panel-header">
+             <h3>Applied Constraints ({{ constraints.length }})</h3>
+             <button class="btn-toggle" @click="showConstraintPanel = false" title="Collapse">−</button>
+           </div>
+           <div v-if="constraints.length === 0" class="empty-state">
+             No constraints applied yet
+           </div>
+           <div v-else class="constraints-list">
+             <div v-for="(constraint, idx) in constraints" :key="idx" class="constraint-item">
+               <div class="constraint-info">
+                 <span class="constraint-type">{{ constraint.type }}</span>
+                 <span class="constraint-details">
+                   <template v-if="constraint.line_name">Line: {{ constraint.line_name }}</template>
+                   <template v-else-if="constraint.point">Point: {{ constraint.point }}</template>
+                   <template v-else-if="constraint.point_name">{{ constraint.point_name }}</template>
+                   <template v-else-if="constraint.line1">{{ constraint.line1 }} = {{ constraint.line2 }}</template>
+                   <template v-if="constraint.value">, Value: {{ constraint.value }}</template>
+                   <template v-if="constraint.angle">, Angle: {{ constraint.angle }}°</template>
+                   <template v-if="constraint.axis_type">, Axis: {{ constraint.axis_type }}</template>
+                 </span>
+               </div>
+               <button class="btn-delete" @click="deleteConstraint(idx)" title="Delete constraint">×</button>
+             </div>
+           </div>
+         </div>
+         <div v-else class="panel-header">
+           <button class="btn-toggle" @click="showConstraintPanel = true" title="Expand">+</button>
+         </div>
       </div>
     </div>
+
+    <!-- Constraint Dialog Modal -->
+     <div v-if="showConstraintDialog" class="modal-overlay" @click="showConstraintDialog = false">
+       <div class="modal-content" @click.stop>
+         <h3>Set {{ constraintType }} Constraint</h3>
+         
+         <!-- For constraints needing two geometries -->
+         <div v-if="constraintType === 'equal_length'">
+           <p class="modal-instruction">Click on a second line to complete equal_length constraint</p>
+           <div class="selected-items">
+             <span v-if="selectedGeometry" class="item">Line 1: {{ selectedGeometry.index }}</span>
+             <span v-if="secondGeometry" class="item">Line 2: {{ secondGeometry.index }}</span>
+           </div>
+         </div>
+
+         <div v-else-if="constraintType === 'symmetry'">
+           <p class="modal-instruction">Click on a second point to complete symmetry constraint</p>
+           <div class="selected-items">
+             <span v-if="selectedGeometry" class="item">Point 1: {{ selectedGeometry.index }}</span>
+             <span v-if="secondGeometry" class="item">Point 2: {{ secondGeometry.index }}</span>
+           </div>
+         </div>
+
+         <div v-else-if="constraintType === 'tangent'">
+           <p class="modal-instruction">Click on a circle to make selected line tangent</p>
+           <div class="selected-items">
+             <span v-if="selectedGeometry" class="item">
+               {{ selectedGeometry.type }}: {{ selectedGeometry.index }}
+             </span>
+             <span v-if="secondGeometry" class="item">
+               {{ secondGeometry.type }}: {{ secondGeometry.index }}
+             </span>
+           </div>
+         </div>
+
+         <div v-else-if="constraintType === 'on_line'">
+           <p class="modal-instruction">Click on a line to constrain point to it</p>
+           <div class="selected-items">
+             <span v-if="selectedGeometry" class="item">Point: {{ selectedGeometry.index }}</span>
+             <span v-if="secondGeometry" class="item">Line: {{ secondGeometry.index }}</span>
+           </div>
+         </div>
+
+         <!-- For constraints needing a value -->
+         <div v-else class="form-group">
+           <label>
+             <template v-if="constraintType === 'angle'">Angle (degrees, 0-360):</template>
+             <template v-else>Value (mm):</template>
+           </label>
+           <input 
+             v-model.number="constraintValue" 
+             type="number" 
+             placeholder="Enter value"
+             @keyup.enter="confirmConstraintValue"
+           />
+         </div>
+
+         <div class="modal-actions">
+           <button class="btn-cancel" @click="showConstraintDialog = false">Cancel</button>
+           <button 
+             class="btn-confirm" 
+             @click="confirmConstraintValue"
+             :disabled="constraintType === 'equal_length' && !secondGeometry || 
+                        constraintType === 'symmetry' && !secondGeometry ||
+                        constraintType === 'tangent' && !secondGeometry ||
+                        constraintType === 'on_line' && !secondGeometry"
+           >
+             Apply
+           </button>
+         </div>
+       </div>
+     </div>
   </div>
 </template>
 
@@ -742,4 +1268,224 @@ const loadSketch = async () => {
     margin: 0;
   }
 }
+
+/* Modal styles */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 8px;
+  padding: 2rem;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  min-width: 300px;
+}
+
+.modal-content h3 {
+  margin: 0 0 1rem;
+  font-size: 1.2rem;
+  color: #2c3e50;
+  text-transform: capitalize;
+}
+
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: #2c3e50;
+  font-weight: 500;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  font-size: 1rem;
+  box-sizing: border-box;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+}
+
+.btn-cancel,
+.btn-confirm {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-cancel {
+  background: #f5f5f5;
+  color: #2c3e50;
+  border: 1px solid #e0e0e0;
+}
+
+.btn-cancel:hover {
+  background: #e0e0e0;
+}
+
+.btn-confirm {
+  background: #667eea;
+  color: white;
+}
+
+.btn-confirm:hover {
+   background: #5568d3;
+ }
+
+/* Constraints Panel Styles */
+.constraints-panel {
+   background: #f5f5f5;
+   border: 1px solid #e0e0e0;
+   border-radius: 4px;
+   padding: 1rem;
+   margin-top: 1rem;
+   max-height: 300px;
+   overflow-y: auto;
+ }
+
+.panel-header {
+   display: flex;
+   justify-content: space-between;
+   align-items: center;
+   margin-bottom: 0.5rem;
+ }
+
+.panel-header h3 {
+   margin: 0;
+   font-size: 0.9rem;
+   color: #2c3e50;
+ }
+
+.btn-toggle {
+   background: none;
+   border: none;
+   color: #667eea;
+   font-size: 1.2rem;
+   cursor: pointer;
+   padding: 0;
+   width: 24px;
+   height: 24px;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+ }
+
+.btn-toggle:hover {
+   background: #e0e7ff;
+   border-radius: 4px;
+ }
+
+.empty-state {
+   padding: 1rem;
+   text-align: center;
+   color: #95a5a6;
+   font-size: 0.85rem;
+ }
+
+.constraints-list {
+   display: flex;
+   flex-direction: column;
+   gap: 0.5rem;
+ }
+
+.constraint-item {
+   display: flex;
+   justify-content: space-between;
+   align-items: center;
+   background: white;
+   padding: 0.75rem;
+   border-radius: 4px;
+   border-left: 3px solid #667eea;
+   font-size: 0.85rem;
+ }
+
+.constraint-info {
+   display: flex;
+   flex-direction: column;
+   gap: 0.25rem;
+   flex: 1;
+ }
+
+.constraint-type {
+   font-weight: 600;
+   color: #2c3e50;
+   text-transform: capitalize;
+ }
+
+.constraint-details {
+   color: #7f8c8d;
+   font-size: 0.8rem;
+ }
+
+.btn-delete {
+   background: #ff6b6b;
+   color: white;
+   border: none;
+   border-radius: 4px;
+   width: 24px;
+   height: 24px;
+   cursor: pointer;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   font-size: 1rem;
+   transition: background 0.2s;
+   margin-left: 0.5rem;
+   flex-shrink: 0;
+ }
+
+.btn-delete:hover {
+   background: #c92a2a;
+ }
+
+/* Modal instruction text */
+.modal-instruction {
+   margin: 0 0 1rem;
+   color: #667eea;
+   font-size: 0.9rem;
+   font-style: italic;
+ }
+
+.selected-items {
+   display: flex;
+   flex-direction: column;
+   gap: 0.5rem;
+   margin-bottom: 1rem;
+   padding: 0.75rem;
+   background: #f5f5f5;
+   border-radius: 4px;
+ }
+
+.selected-items .item {
+   color: #2c3e50;
+   font-size: 0.9rem;
+   padding: 0.25rem 0;
+ }
 </style>

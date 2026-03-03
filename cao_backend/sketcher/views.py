@@ -120,26 +120,40 @@ class SolveConstraintsView(APIView):
             
             # Apply constraints
             for constraint in constraints_list:
-                try:
-                    constraint_type = constraint.get('type', '')
-                    
-                    if constraint_type == 'horizontal':
-                        solver.constrain_horizontal(constraint['line_name'])
-                    elif constraint_type == 'vertical':
-                        solver.constrain_vertical(constraint['line_name'])
-                    elif constraint_type == 'length':
-                        solver.constrain_length(constraint['line_name'], constraint['value'])
-                    elif constraint_type == 'coincident':
-                        solver.constrain_coincident(constraint['point1'], constraint['point2'])
-                    elif constraint_type == 'parallel':
-                        solver.constrain_parallel(constraint['line1'], constraint['line2'])
-                    elif constraint_type == 'perpendicular':
-                        solver.constrain_perpendicular(constraint['line1'], constraint['line2'])
-                    elif constraint_type == 'position':
-                        solver.constrain_distance(constraint['point'], constraint['x'], constraint['y'])
-                        
-                except Exception as e:
-                    errors.append(f"Error applying constraint: {str(e)}")
+                 try:
+                     constraint_type = constraint.get('type', '')
+                     
+                     if constraint_type == 'horizontal':
+                         solver.constrain_horizontal(constraint['line_name'])
+                     elif constraint_type == 'vertical':
+                         solver.constrain_vertical(constraint['line_name'])
+                     elif constraint_type == 'length':
+                         solver.constrain_length(constraint['line_name'], constraint['value'])
+                     elif constraint_type == 'coincident':
+                         solver.constrain_coincident(constraint['point1'], constraint['point2'])
+                     elif constraint_type == 'parallel':
+                         solver.constrain_parallel(constraint['line1'], constraint['line2'])
+                     elif constraint_type == 'perpendicular':
+                         solver.constrain_perpendicular(constraint['line1'], constraint['line2'])
+                     elif constraint_type == 'position':
+                         solver.constrain_distance(constraint['point'], constraint['x'], constraint['y'])
+                     elif constraint_type == 'equal_length':
+                         solver.constrain_equal_length(constraint['line1'], constraint['line2'])
+                     elif constraint_type == 'angle':
+                         solver.constrain_angle(constraint['line_name'], constraint['angle'])
+                     elif constraint_type == 'symmetry':
+                         solver.constrain_symmetry(
+                             constraint['point1'], 
+                             constraint['point2'], 
+                             constraint.get('axis_type', 'vertical')
+                         )
+                     elif constraint_type == 'tangent':
+                         solver.constrain_tangent(constraint['line_name'], constraint['circle_name'])
+                     elif constraint_type == 'on_line':
+                         solver.constrain_point_on_line(constraint['point_name'], constraint['line_name'])
+                         
+                 except Exception as e:
+                     errors.append(f"Error applying constraint: {str(e)}")
             
             # Solve constraints
             solved, solve_message = solver.solve()
