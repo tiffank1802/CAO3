@@ -1,0 +1,54 @@
+# Core Django
+Django==4.2.11
+djangorestframework==3.14.0
+django-cors-headers==4.3.1
+django-environ==0.13.0
+django-filter==24.1
+python-decouple==3.8
+
+# Database
+psycopg[binary]>=3.1
+django-extensions==3.2.3
+
+# WebSocket & Real-time
+channels==4.0.0
+channels-redis==4.1.0
+daphne==4.0.0
+
+# Task Queue
+celery==5.3.4
+redis==5.0.1
+
+# CAD & Geometry
+CadQuery==2.7.0
+cassowary==0.5.2
+
+# Serialization & Data
+djangorestframework-simplejwt==5.5.1
+marshmallow==3.20.1
+
+# Testing
+pytest==7.4.4
+pytest-django==4.7.0
+factory-boy==3.3.0
+faker==22.2.0
+
+# Code Quality
+black==24.1.1
+flake8==7.0.0
+isort==5.13.2
+
+# Monitoring & Logging
+python-json-logger==2.0.7
+
+# Development
+django-debug-toolbar==4.2.0
+ipython==8.20.0
+ipdb==0.13.13
+
+# Documentation
+drf-spectacular==0.26.5
+
+# Security
+cryptography==41.0.7
+pyjwt==2.11.0
