@@ -8,6 +8,22 @@
 
 ---
 
+> ### 🆕 Mise à jour du 2026-10-14 — Plan « CAO type SolidWorks » sur Replicad (noyau 100 % navigateur)
+>
+> Le projet évolue vers **une CAO paramétrique de type SolidWorks exécutée entièrement dans le navigateur** (OpenCascade WASM via `replicad`), avec rubans, arbre de construction, esquisses contraintes (planegcs), fonctions 3D avancées, assemblages et mise en plan.
+>
+> Trois documents pilotent cette nouvelle étape :
+>
+> | Document | Contenu |
+> |---|---|
+> | 🧭 **[PLAN_CAO_REPLICAD.md](PLAN_CAO_REPLICAD.md)** | Vision, architecture, modèle de document, moteur de reconstruction, nomenclature topologique, feuille de route par lots, performances, tests, risques |
+> | 🎛️ **[SPEC_RUBANS_FONCTIONS.md](SPEC_RUBANS_FONCTIONS.md)** | Spécification de chaque ruban et de chaque commande (169 commandes), états, raccourcis, interaction |
+> | 🔬 **[SPIKE_REPLICAD_FINDINGS.md](SPIKE_REPLICAD_FINDINGS.md)** | Rapport de vérification technique : capacités confirmées, 14 pièges mesurés et leurs contournements, benchmarks |
+>
+> Les documents ci-dessous (architecture Django/CadQuery, Event Sourcing, Cassowary) restent la référence pour la partie **persistance, comptes, projets et collaboration**, désormais optionnelle et sans aucun calcul géométrique côté serveur.
+
+---
+
 ## 🎯 Objectif
 
 Fournir une **architecture détaillée et approuvée** pour une application CAO web complète avec:
