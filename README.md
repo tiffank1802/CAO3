@@ -18,9 +18,11 @@
 > |---|---|
 > | 🧭 **[PLAN_CAO_REPLICAD.md](PLAN_CAO_REPLICAD.md)** | Vision, architecture, modèle de document, moteur de reconstruction, nomenclature topologique, feuille de route par lots, performances, tests, risques |
 > | 🎛️ **[SPEC_RUBANS_FONCTIONS.md](SPEC_RUBANS_FONCTIONS.md)** | Spécification de chaque ruban et de chaque commande (169 commandes), états, raccourcis, interaction |
-> | 🔬 **[SPIKE_REPLICAD_FINDINGS.md](SPIKE_REPLICAD_FINDINGS.md)** | Rapport de vérification technique : capacités confirmées, 14 pièges mesurés et leurs contournements, benchmarks |
+> | 🔬 **[SPIKE_REPLICAD_FINDINGS.md](SPIKE_REPLICAD_FINDINGS.md)** | Rapport de vérification technique : capacités confirmées, 12 pièges mesurés et leurs contournements, benchmarks, rectificatif |
 >
-> Les documents ci-dessous (architecture Django/CadQuery, Event Sourcing, Cassowary) restent la référence pour la partie **persistance, comptes, projets et collaboration**, désormais optionnelle et sans aucun calcul géométrique côté serveur.
+> L'application autonome correspondante est en cours de construction dans **[`cao_web/`](cao_web/README.md)** (Vue 3 + TypeScript + Vite, noyau OpenCascade WASM dans un worker, solveur planegcs) : rubans type SolidWorks, esquisse 2D contrainte, arbre de construction, export STEP/STL.
+>
+> Les documents ci-dessous (architecture Django/CadQuery, Event Sourcing, Cassowary) restent la référence historique pour la partie **persistance, comptes, projets et collaboration**, désormais optionnelle et sans aucun calcul géométrique côté serveur.
 
 ---
 

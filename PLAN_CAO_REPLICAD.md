@@ -1,7 +1,7 @@
 # 🧭 Plan de construction — CAO web « type SolidWorks » sur Replicad
 
 **Version** : 1.0 · **Date** : 2026-10-14 · **Statut** : proposition à valider  
-**Base technique vérifiée** : `replicad 1.1.0` + `replicad-opencascadejs 1.1.0` + `@salusoft89/planegcs 1.3.0` + `three 0.186.1` → voir **[SPIKE_REPLICAD_FINDINGS.md](SPIKE_REPLICAD_FINDINGS.md)** (toutes les capacités et limites citées ici ont été mesurées, pas supposées).  
+**Base technique vérifiée** : `replicad 1.1.0` + `replicad-opencascadejs 1.1.0` + `@salusoft89/planegcs 1.3.0` + `three 0.186.1` → voir **[SPIKE_REPLICAD_FINDINGS.md](SPIKE_REPLICAD_FINDINGS.md)** (toutes les capacités et limites citées ici ont été mesurées puis rejouées — voir le rectificatif §8 du spike).  
 **Spécification détaillée des rubans** : **[SPEC_RUBANS_FONCTIONS.md](SPEC_RUBANS_FONCTIONS.md)**
 
 ---
@@ -37,10 +37,10 @@ Tôlerie (dépliage), surfaces NURBS avancées, simulation/FEA, CAM/usinage, ren
 |---|---|---|
 | P1 | **Le document est la vérité, la géométrie est un cache.** Un document = JSON sérialisable (arbre de fonctions, esquisses, contraintes, configurations) ; la B-Rep se reconstruit. | `hashCode` instable, B-Rep non sérialisable ; permet undo/redo, versions, partage, import. |
 | P2 | **Le noyau vit dans un Web Worker.** Thread UI jamais bloqué ; OC WASM instancié une fois par worker. | Init 241 ms, opérations 10–250 ms, exceptions qui corrompent l'instance. |
-| P3 | **Panier de contournements centralisé** (`kernel/compat.ts`) pour `makeBox`, `loft`, `intersect`, `draft`, `cut(array)`. | 5 pièges vérifiés — aucun appel direct dans le code métier. |
+| P3 | **Panier de contournements centralisé** (`kernel/compat.ts`) : `loftSafe`, `boxSafe`, `cutMany`, `fuseOrCompound`, `intersectSafe`, facteurs de dépouille. | Pièges vérifiés (loft, draft, fillet à tableau, cut à tableau, `makeBox` à deux coins) — aucun appel direct dans le code métier. |
 | P4 | **Nomenclature topologique maison** : toute sélection persistée est une *référence géométrique* (jamais un `hashCode`). | Faces/arêtes changent d'identifiant à chaque rebuild. |
 | P5 | **Aucun échec silencieux** : chaque fonction produit un `FeatureResult { shape, warnings[], timings, refs }`, validé (volume > 0, bbox, faces). | Coque invalide renvoyée sans erreur (volume négatif). |
-| P6 | **Fail-fast contrôlé** : toute exception WASM ⇒ worker *dirty*, redémarrage + rejeu de l'arbre jusqu'à la fonction fautive. | État OC corrompu après exception. |
+| P6 | **Erreur capturée, jamais subie** : une fonction qui échoue est signalée dans l'arbre, la reconstruction se poursuit sur le dernier état valide ; redémarrage du worker à la demande. | Une exception attrapée **ne corrompt pas** la session (vérifié) : inutile de redémarrer le noyau à chaque erreur. |
 | P7 | **Le rendu est un cache jetable** : maillage tessellé, jamais une donnée persistée ; niveaux de détail adaptatifs. | Coût tessellation 4–576 ms selon tolérance. |
 | P8 | **Tout est adressable** : chaque fonction, esquisse, contrainte, cote, vue, contrainte d'assemblage a un identifiant stable, utilisé pour l'UI, l'URL d'état, les tests et le partage. | Condition d'un produit maintenable. |
 | P9 | **Offline-first** : sauvegarde locale (IndexedDB), fichiers locaux, aucune dépendance CDN (police TTF embarquée). | Textes, export, reprise de session. |
@@ -340,10 +340,10 @@ export interface RebuildResponse {
 | Tâches | Livrable | Critères d'acceptation |
 |---|---|---|
 | Projet Vite+TS+Vue, ESLint/Prettier, Vitest, CI | `npm run dev/build/test` verts | CI < 3 min |
-| Worker noyau + RPC typé + `compat.ts` + `validate.ts` | `KernelClient.rebuild()` | Cube 80×50×20 reconstruit en < 100 ms ; redémarrage worker automatique après erreur provoquée (test) |
+| Worker noyau + RPC typé + `compat.ts` + `validate.ts` | `KernelClient.rebuild()` | Cube 80×50×20 reconstruit en < 100 ms ; récupération après exception provoquée (test) |
 | Viewer three.js + mesh/edgeGroups + picking | cube sélectionnable (face/arête/sommet) | 60 fps sur 100 k triangles ; surbrillance correcte |
 | Tessellation adaptative + budget | qualité preview/final | tolérance par défaut 0,05/0,3 ; mesure des durées |
-| Conversion des 14 pièges du spike en tests | `tests/kernel/pièges.spec.ts` | 14/14 passent et documentent les contournements |
+| Conversion des 12 pièges du spike en tests | `tests/kernel.spec.ts` | 16 tests passent et documentent les contournements |
 
 ### Lot 1 — Esquisse 2D complète (12 j) 🎯
 
@@ -461,7 +461,7 @@ export interface RebuildResponse {
 | Risque | Prob. | Impact | Parade |
 |---|---|---|---|
 | Nomenclature topologique imparfaite → sélections perdues | Élevée | Élevé | Lignage par builder (déterministe) + signatures + avertissements explicites + tests dédiés ; jamais de plantage |
-| Exceptions WASM / état corrompu | Élevée | Élevé | `compat.ts` + worker *dirty* + rejeu + journal ; le document reste sain (il est en JSON) |
+| Exceptions WASM (souvent opaques : `makeBox(20,20,20)` ne dit pas pourquoi il échoue) | Moyenne | Moyen | `compat.ts` (API correctes encapsulées), capture par fonction, message clair côté UI, journal ; le document reste sain (il est en JSON) |
 | Lenteur sur modèles complexes | Moyenne | Élevé | Checkpoints, booléens groupés, preview maillée, budgets et avertissements, WASM multi-thread |
 | WASM 6,9 Mo / 1ʳᵉ ouverture | Certaine | Moyen | Cache, streaming, chargement paresseux, message de progression ; possibilité d'un build OC réduit (compilation Emscripten ciblée) en v2 |
 | `replicad` (1 mainteneur) peut régresser | Moyenne | Moyen | Nos tests épinglent les versions ; `compat.ts` isole l'API ; possibilité d'appeler OC directement via `getOC()` |
