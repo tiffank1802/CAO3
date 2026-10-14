@@ -5,11 +5,18 @@
  * - redémarrage automatique du worker après une erreur fatale (état OC corrompu).
  */
 import type { CadDocument } from "../core/types";
-import type { ExportResult, KernelRequest, KernelResponse, RebuildResult } from "./protocol";
+import type { ExportResult, KernelProgress, KernelRequest, KernelResponse, RebuildResult } from "./protocol";
 
 export type KernelStatus = "idle" | "loading" | "ready" | "error" | "restarting";
 
 type StatusListener = (status: KernelStatus, detail?: string) => void;
+type ProgressListener = (progress: KernelProgress) => void;
+
+/** Mémoire JavaScript du thread principal (Chrome uniquement) — pour le diagnostic. */
+export function jsHeapBytes(): number | null {
+  const memory = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
+  return typeof memory?.usedJSHeapSize === "number" ? memory.usedJSHeapSize : null;
+}
 
 interface Pending {
   resolve: (value: never) => void;
@@ -21,9 +28,18 @@ export class KernelClient {
   private sequence = 0;
   private pending = new Map<number, Pending>();
   private listeners = new Set<StatusListener>();
+  private progressListeners = new Set<ProgressListener>();
   private status: KernelStatus = "idle";
   private initPromise: Promise<void> | null = null;
   private lastRebuild = 0;
+  private restarting: Promise<void> | null = null;
+  /**
+   * Durée au-delà de laquelle une reconstruction est considérée comme perdue.
+   * Un calcul OpenCascade pathologique (des milliers d'arêtes) ne consomme pas seulement
+   * du temps : il fait grossir un tas WASM que le navigateur ne récupère jamais. Redémarrer
+   * le worker rend toute cette mémoire d'un coup — c'est le garde-fou anti-plantage.
+   */
+  watchdogMs = 20_000;
 
   get currentStatus(): KernelStatus {
     return this.status;
@@ -35,6 +51,11 @@ export class KernelClient {
     return () => this.listeners.delete(listener);
   }
 
+  onProgress(listener: ProgressListener): () => void {
+    this.progressListeners.add(listener);
+    return () => this.progressListeners.delete(listener);
+  }
+
   private setStatus(status: KernelStatus, detail?: string): void {
     this.status = status;
     for (const listener of this.listeners) listener(status, detail);
@@ -44,6 +65,10 @@ export class KernelClient {
     const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module", name: "cao-kernel" });
     worker.onmessage = (event: MessageEvent<KernelResponse>) => {
       const response = event.data;
+      if (response.ok && response.kind === "progress") {
+        for (const listener of this.progressListeners) listener(response.progress);
+        return;
+      }
       const entry = this.pending.get(response.id);
       if (!entry) return;
       this.pending.delete(response.id);
@@ -63,11 +88,23 @@ export class KernelClient {
     return worker;
   }
 
-  private send<T>(request: KernelRequest, transfer: Transferable[] = []): Promise<T> {
+  private send<T>(request: KernelRequest, transfer: Transferable[] = [], timeoutMs = 0): Promise<T> {
     if (!this.worker) throw new Error("Worker noyau non démarré.");
     const worker = this.worker;
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(request.id, { resolve: resolve as (value: never) => void, reject });
+      const timer =
+        timeoutMs > 0
+          ? window.setTimeout(() => {
+              this.pending.delete(request.id);
+              reject(new Error(`Calcul interrompu après ${Math.round(timeoutMs / 1000)} s : mémoire du noyau libérée et redémarrage en cours. Le document est intact — relancez la reconstruction.`));
+              void this.restartInBackground();
+            }, timeoutMs)
+          : null;
+      const settle = <F extends (value: never) => void>(fn: F) => ((value: never) => {
+        if (timer !== null) window.clearTimeout(timer);
+        fn(value);
+      }) as F;
+      this.pending.set(request.id, { resolve: settle(resolve as (value: never) => void), reject: settle(reject) });
       worker.postMessage(request, transfer);
     });
   }
@@ -93,7 +130,7 @@ export class KernelClient {
     await this.init();
     const id = ++this.sequence;
     this.lastRebuild = id;
-    const response = await this.send<RebuildResult>({ id, kind: "rebuild", document, revision: id, quality });
+    const response = await this.send<RebuildResult>({ id, kind: "rebuild", document, revision: id, quality }, [], this.watchdogMs);
     if (id !== this.lastRebuild) throw new Error("reconstruction obsolète");
     return response;
   }
@@ -111,6 +148,17 @@ export class KernelClient {
     this.pending.clear();
     this.initPromise = null;
     await this.init();
+  }
+
+  /** Redémarrage silencieux : le worker fautif est tué et un noyau neuf prend sa place. */
+  private restartInBackground(): Promise<void> {
+    if (this.restarting) return this.restarting;
+    this.restarting = this.restart()
+      .catch((error: Error) => this.setStatus("error", error.message))
+      .finally(() => {
+        this.restarting = null;
+      });
+    return this.restarting;
   }
 
   terminate(): void {

@@ -23,6 +23,14 @@ export type FeatureState =
   | { featureId: string; status: "warning"; ms: number; warnings: string[] }
   | { featureId: string; status: "error"; ms: number; message: string };
 
+/** Progression du chargement du noyau, remontée du worker vers l'interface. */
+export interface KernelProgress {
+  phase: string;
+  loaded: number;
+  total: number | null;
+  fraction: number | null;
+}
+
 export interface RebuildResult {
   revision: number;
   mesh: MeshPayload | null;
@@ -31,6 +39,8 @@ export interface RebuildResult {
   /** Volume en mm³ du corps final (null si aucune géométrie). */
   volume: number | null;
   messages: string[];
+  /** Taille du tas WebAssembly d'OpenCascade après reconstruction (octets). */
+  heapBytes: number | null;
 }
 
 export interface ExportResult {
@@ -64,7 +74,8 @@ export type KernelRequest =
 export type SolverRequest = { id: number; kind: "solve"; sketch: SketchData };
 
 export type KernelResponse =
-  | { id: number; ok: true; kind: "init"; version: string; ms: number }
+  | { id: number; ok: true; kind: "progress"; progress: KernelProgress }
+  | { id: number; ok: true; kind: "init"; version: string; ms: number; heapBytes: number | null }
   | { id: number; ok: true; kind: "rebuild"; result: RebuildResult }
   | { id: number; ok: true; kind: "export"; result: ExportResult }
   | { id: number; ok: true; kind: "ping"; ms: number }

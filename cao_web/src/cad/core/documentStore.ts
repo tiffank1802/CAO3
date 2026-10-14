@@ -8,12 +8,26 @@ import type { CadDocument, Feature, SketchData, SketchFeature } from "./types";
 import { findFeature, isExtrudeFeature, isSketchFeature } from "./types";
 import { createDocument, createExtrudeFeature, createSketchFeature, validateDocument } from "./registry";
 import { newId } from "./ids";
-import { KernelClient, type KernelStatus } from "../kernel/client";
+import { jsHeapBytes, KernelClient, type KernelStatus } from "../kernel/client";
 import { SolverClient } from "../kernel/solverClient";
 import type { RebuildResult, SolveResult } from "../kernel/protocol";
 import { addRectangleCentered, applySolveResult } from "../sketch/model";
+import {
+  deleteDocumentRecord,
+  isStorageAvailable,
+  latestDocument,
+  listDocuments,
+  loadDocumentRecord,
+  saveDocumentRecord,
+  type StoredDocumentMeta,
+} from "../io/storage";
 
 export type ViewStyle = "shaded-edges" | "shaded" | "wireframe" | "transparent";
+
+/** Seuil au-delà duquel on prévient l'utilisateur avant que le navigateur ne sature. */
+export const MEMORY_WARN_HEAP_BYTES = 900 * 1024 * 1024;
+/** Tessellation allégée pendant un glissement d'esquisse (aperçu) et au-delà de ce triangle. */
+export const PREVIEW_TRIANGLE_LIMIT = 400_000;
 export type ViewName = "iso" | "front" | "top" | "right";
 
 export interface SelectionInfo {
@@ -68,6 +82,20 @@ export const useCadStore = defineStore("cad", () => {
     selectedDimensionId: null,
   });
 
+  const loadProgress = ref<{ phase: string; loaded: number; total: number | null; fraction: number | null } | null>(null);
+  const storage = reactive<{
+    available: boolean;
+    lastSavedAt: number;
+    saving: boolean;
+    documents: StoredDocumentMeta[];
+    error: string;
+  }>({ available: false, lastSavedAt: 0, saving: false, documents: [], error: "" });
+  const memory = ref<{ heapBytes: number | null; jsBytes: number | null; peakJsBytes: number }>({
+    heapBytes: null,
+    jsBytes: null,
+    peakJsBytes: 0,
+  });
+
   const undoStack: string[] = [];
   const redoStack: string[] = [];
   let revision = 0;
@@ -88,10 +116,42 @@ export const useCadStore = defineStore("cad", () => {
       .map((s) => ({ featureId: s.featureId, message: (s as { message: string }).message })),
   );
   const kernelReady = computed(() => kernelStatus.value === "ready");
+  const meshTriangles = computed(() => build.value?.mesh?.triangleCount ?? 0);
+  const triangles = computed(() => build.value?.mesh?.triangleCount ?? 0);
+
+  /** Vrai quand la mémoire du noyau approche la zone où un navigateur commence à lâcher. */
+  const memoryPressure = computed(() => {
+    const heap = memory.value.heapBytes;
+    if (heap !== null && heap >= MEMORY_WARN_HEAP_BYTES) return "noyau";
+    if (memory.value.jsBytes !== null && memory.value.jsBytes >= MEMORY_WARN_HEAP_BYTES) return "interface";
+    return null;
+  });
+  const memoryLabel = computed(() => {
+    const fmt = (bytes: number | null) => (bytes === null ? "—" : `${(bytes / 1024 / 1024).toFixed(0)} Mo`);
+    return `noyau ${fmt(memory.value.heapBytes)} · interface ${fmt(memory.value.jsBytes)}`;
+  });
+
+  /** Sonde légère : la mémoire disponible sans reconstruction (simple ping au worker). */
+  async function refreshMemory(): Promise<void> {
+    const jsBytes = jsHeapBytes();
+    memory.value = {
+      jsBytes,
+      peakJsBytes: Math.max(memory.value.peakJsBytes, jsBytes ?? 0),
+      heapBytes: memory.value.heapBytes,
+    };
+  }
 
   kernel.onStatus((status, detail) => {
     kernelStatus.value = status;
     if (detail) kernelDetail.value = detail;
+    if (status === "ready") loadProgress.value = null;
+    // Chaque redémarrage du worker rend toute la mémoire d'OpenCascade d'un coup :
+    // c'est la seule façon de la récupérer, le tas WASM ne rétrécit jamais.
+    if (status === "restarting") memory.value = { ...memory.value, heapBytes: null };
+  });
+
+  kernel.onProgress((progress) => {
+    loadProgress.value = progress;
   });
 
   function snapshot(label: string): void {
@@ -130,10 +190,20 @@ export const useCadStore = defineStore("cad", () => {
     rebuildTimer = null;
     rebuilding.value = true;
     revision += 1;
+    // Adaptatif : au-delà du seuil (ou pendant un glissement d'esquisse), on demande la
+    // tessellation légère. Le maillage n'est qu'un cache — le B-Rep reste exact.
+    const effective: "preview" | "final" = quality === "final" && meshTriangles.value > PREVIEW_TRIANGLE_LIMIT ? "preview" : quality;
     try {
-      const result = await kernel.rebuild(document.value, quality);
+      const result = await kernel.rebuild(document.value, effective);
       build.value = result;
       buildError.value = "";
+      scheduleAutosave();
+      const jsBytes = jsHeapBytes();
+      memory.value = {
+        heapBytes: result.heapBytes,
+        jsBytes,
+        peakJsBytes: Math.max(memory.value.peakJsBytes, jsBytes ?? 0),
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (!message.includes("obsolète")) buildError.value = message;
@@ -195,6 +265,9 @@ export const useCadStore = defineStore("cad", () => {
   }
 
   /** Résout l'esquisse en cours et met à jour la géométrie résolue. */
+  /** Pendant un glissement, seule la qualité d'aperçu est reconstruite (le final suit au relâchement). */
+  let draggingSketch = false;
+
   async function solveSketchNow(): Promise<SolveResult | null> {
     const feature = activeSketchFeature.value;
     if (!feature) return null;
@@ -207,7 +280,7 @@ export const useCadStore = defineStore("cad", () => {
       sketchSession.redundant = result.redundant;
       sketchSession.status = "idle";
       solverDetail.value = `${result.ms.toFixed(1)} ms · ${result.dof < 0 ? "dof ?" : `${result.dof} degré(s) de liberté`}`;
-      scheduleRebuild("final");
+      scheduleRebuild(draggingSketch ? "preview" : "final", draggingSketch ? 16 : undefined);
       return result;
     } catch (error) {
       sketchSession.status = "error";
@@ -348,6 +421,31 @@ export const useCadStore = defineStore("cad", () => {
     void solveSketchNow();
   }
 
+  const restartingKernel = ref(false);
+
+  /**
+   * Libère la mémoire du noyau : on tue le worker (toute la mémoire OpenCascade est rendue
+   * au système d'un coup) et on relance un noyau neuf, puis on reconstruit le document.
+   * C'est l'action « anti-plantage » : elle est toujours disponible, jamais destructive.
+   */
+  async function releaseMemory(): Promise<void> {
+    if (restartingKernel.value) return;
+    restartingKernel.value = true;
+    try {
+      await kernel.restart();
+      memory.value = { heapBytes: null, jsBytes: jsHeapBytes(), peakJsBytes: 0 };
+      await rebuildNow();
+    } finally {
+      restartingKernel.value = false;
+    }
+  }
+
+  /** Signale un glissement d'esquisse en cours (active la reconstruction d'aperçu). */
+  function setSketchDragging(value: boolean): void {
+    draggingSketch = value;
+    if (!value) scheduleRebuild("final");
+  }
+
   function setSketchTool(tool: SketchSession["tool"]): void {
     sketchSession.tool = tool;
     if (tool !== "select") sketchSession.selectedDimensionId = null;
@@ -405,6 +503,85 @@ export const useCadStore = defineStore("cad", () => {
     scheduleRebuild("final");
   }
 
+  /** Prépare le stockage local et reprend la session précédente si elle existe. */
+  async function initStorage(): Promise<void> {
+    storage.available = await isStorageAvailable();
+    if (!storage.available) {
+      storage.error = "Stockage local indisponible (navigation privée ?). Utilisez les fichiers .cao3.json.";
+      return;
+    }
+    await refreshLocalDocuments();
+    const last = await latestDocument();
+    if (last && document.value.features.length === 0) {
+      const record = await loadDocumentRecord(last.id);
+      if (record) {
+        document.value = JSON.parse(record.json) as CadDocument;
+        storage.lastSavedAt = record.updatedAt;
+        build.value = null;
+        scheduleRebuild("final", 0);
+      }
+    }
+  }
+
+  async function refreshLocalDocuments(): Promise<void> {
+    storage.documents = await listDocuments();
+  }
+
+  /** Enregistre le document dans la base du navigateur (aucun envoi réseau). */
+  async function saveToLocal(): Promise<boolean> {
+    if (!storage.available) return false;
+    storage.saving = true;
+    try {
+      const ok = await saveDocumentRecord({
+        id: document.value.id,
+        name: document.value.name,
+        json: JSON.stringify(document.value),
+        features: document.value.features.length,
+        volume: build.value?.volume ?? null,
+      });
+      if (ok) storage.lastSavedAt = Date.now();
+      else storage.error = "Enregistrement refusé (quota de stockage atteint ?).";
+      await refreshLocalDocuments();
+      return ok;
+    } finally {
+      storage.saving = false;
+    }
+  }
+
+  async function openLocalDocument(id: string): Promise<void> {
+    const record = await loadDocumentRecord(id);
+    if (!record) return;
+    snapshot("ouverture locale");
+    document.value = JSON.parse(record.json) as CadDocument;
+    storage.lastSavedAt = record.updatedAt;
+    sketchSession.featureId = "";
+    selection.value = null;
+    scheduleRebuild("final", 0);
+  }
+
+  async function removeLocalDocument(id: string): Promise<void> {
+    await deleteDocumentRecord(id);
+    await refreshLocalDocuments();
+  }
+
+  /** Sauvegarde automatique : différée pour ne pas écrire à chaque frappe. */
+  let autosaveTimer: number | null = null;
+  function scheduleAutosave(delay = 1500): void {
+    if (!storage.available) return;
+    if (autosaveTimer !== null) window.clearTimeout(autosaveTimer);
+    autosaveTimer = window.setTimeout(() => {
+      autosaveTimer = null;
+      void saveToLocal();
+    }, delay);
+  }
+
+  const lastSavedLabel = computed(() => {
+    if (!storage.available) return "stockage local indisponible";
+    if (!storage.lastSavedAt) return "non enregistré";
+    const time = new Date(storage.lastSavedAt);
+    return `enregistré à ${String(time.getHours()).padStart(2, "0")}:${String(time.getMinutes()).padStart(2, "0")}`;
+  });
+
   function loadDocument(json: string): void {
     const parsed = JSON.parse(json) as CadDocument;
     if (!parsed.features) throw new Error("Fichier invalide : clé « features » absente.");
@@ -450,6 +627,22 @@ export const useCadStore = defineStore("cad", () => {
     warnings,
     errors,
     kernelReady,
+    loadProgress,
+    memory,
+    memoryPressure,
+    memoryLabel,
+    triangles,
+    refreshMemory,
+    storage,
+    lastSavedLabel,
+    initStorage,
+    saveToLocal,
+    openLocalDocument,
+    removeLocalDocument,
+    refreshLocalDocuments,
+    restartingKernel,
+    releaseMemory,
+    setSketchDragging,
     undoStackSize: computed(() => undoStack.length),
     redoStackSize: computed(() => redoStack.length),
     ensureKernel,

@@ -10,9 +10,27 @@ import type { Shape3D } from "replicad";
 import type { CadDocument, Feature, SketchFeature } from "../core/types";
 import { isSketchFeature } from "../core/types";
 import { buildExtrude } from "./builders/extrude";
+import { kernelHeapBytes } from "./init";
 import { emptyMesh, QUALITY, tessellate } from "./tessellate";
 import type { ExportResult, FeatureState, RebuildResult } from "./protocol";
 import { inspectShape, validateShape, type ShapeStats } from "./validate";
+
+/**
+ * Libère explicitement une forme OpenCascade.
+ *
+ * Mesuré (PERFORMANCES_NAVIGATEUR.md §4) : `delete()` rend les poignées côté JavaScript et
+ * évite d'accumuler des références, mais **ne fait pas rétrécir le tas WASM** — Emscripten ne
+ * rend jamais la mémoire au système. On appelle donc `delete()` systématiquement (c'est gratuit
+ * et cela évite les fuites de poignées), sans en attendre une baisse de mémoire : la seule
+ * façon de récupérer le tas est de tuer le worker (`KernelClient.restart`).
+ */
+export function freeShape(shape: Shape3D | null | undefined): void {
+  try {
+    (shape as unknown as { delete?: () => void } | null)?.delete?.();
+  } catch {
+    // Forme déjà libérée : sans conséquence.
+  }
+}
 
 export interface ShapeBuildResult {
   shape: Shape3D | null;
@@ -45,6 +63,8 @@ export function buildShape(doc: CadDocument, now: () => number = () => performan
       if (!isSketchFeature(profile)) throw new Error("Esquisse source introuvable ou supprimée.");
       const outcome = buildExtrude(profile as SketchFeature, feature, shape);
       const nextShape = (outcome.shape ?? null) as Shape3D | null;
+      // La forme précédente n'est plus référencée : on la libère tout de suite.
+      if (shape && nextShape !== shape) freeShape(shape);
       const nextStats = inspectShape(nextShape);
       const warnings = [...outcome.warnings, ...validateShape(nextStats, stats)];
       shape = nextShape;
@@ -90,7 +110,10 @@ export function rebuildDocument(
     }
   }
 
-  return { revision, mesh, states, totalMs, volume, messages };
+  // La forme finale a rempli son rôle (maillage + volume) : on rend la mémoire au système.
+  if (shape) freeShape(shape);
+
+  return { revision, mesh, states, totalMs, volume, messages, heapBytes: kernelHeapBytes() };
 }
 
 export async function exportDocument(doc: CadDocument, format: "step" | "stl"): Promise<ExportResult> {
@@ -104,6 +127,7 @@ export async function exportDocument(doc: CadDocument, format: "step" | "stl"): 
   const safeName = baseName || "piece";
   const blob = (format === "step" ? shape.blobSTEP() : shape.blobSTL({ binary: true })) as unknown as Blob;
   const buffer = await blob.arrayBuffer();
+  freeShape(shape);
   return {
     format,
     data: new Uint8Array(buffer),

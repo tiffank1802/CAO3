@@ -428,14 +428,15 @@ export interface RebuildResponse {
 
 | Levier | Cible | Mise en œuvre |
 |---|---|---|
-| Chargement du noyau | 1ʳᵉ interaction < 1,5 s après ouverture | Chargement paresseux + streaming WASM + `CacheStorage` (6,9 Mo gzip à mettre en cache une fois) ; écran de progression ; démo « bac à sable » sans noyau pour la page d'accueil |
+| Chargement du noyau | 1ʳᵉ interaction < 1,5 s après ouverture | **Fait** : démarrage après la première image + streaming WASM avec progression réelle (22,98 Mo → 7,27 Mo gzip), assets hachés donc mis en cache par le navigateur ; solveur chargé seulement à la première esquisse. **Reste (lot 3)** : Service Worker (`CacheStorage`) pour un démarrage hors-ligne, à valider dans un navigateur réel |
 | Rebuild d'une pièce | < 1 s pour 30 fonctions | Checkpoints par fonction, rejeu du seul sous-arbre *sale*, tessellation incrémentale |
 | Interaction cote | 60 fps visuel, 15 reconstructions/s max | Debounce, qualité *preview*, annulation des RPC obsolètes |
 | Répétitions massives | < 1 s pour 200 perçages | **Un seul booléen** sur compound + checkpoint avant/après + avertissement au-delà de 500 instances |
-| Tessellation | preview 0,2/0,6 · final 0,05/0,3 · mesure 0,01/0,1 | Budget par fonction ; passe finale en tâche de fond |
+| Tessellation | preview 0,25/0,6 · final 0,05/0,3 · mesure 0,01/0,15 | **Fait** : LOD à deux niveaux + rétrogradation automatique au-delà de 400 000 triangles (mesuré : 5 292 triangles / 73 ms en aperçu contre 10 332 / 123 ms en final sur une plaque à 60 trous) |
 | Sélection | < 16 ms | `faceId`/`edgeId` mappés directement dans les `faceGroups`/`edgeGroups` (pas de requête OC pour un survol) |
-| Mémoire | aucun crash sur 2 h de session | `delete()` explicite des formes intermédiaires, compteur d'objets OC, redémarrage du worker au-delà du seuil, monitor visible dans la barre d'état |
-| Parallélisme | rebuild + solveur + I/O concurrents | Pool de workers : 1 noyau par document, 1 solveur, 1 I/O |
+| Mémoire | aucun crash sur 2 h de session | **Mesuré** : le tas WASM ne se libère jamais (`delete()` ne le fait pas baisser). Donc : chien de garde de 20 s sur chaque reconstruction (worker tué + relancé), action « Libérer la mémoire » à un clic, alerte à 900 Mo, `delete()` systématique pour les poignées, monitor permanent dans la barre d'état → [PERFORMANCES_NAVIGATEUR.md](PERFORMANCES_NAVIGATEUR.md) §4 |
+| Parallélisme | rebuild + solveur + I/O concurrents | **Fait** : 1 worker noyau + 1 worker solveur, RPC annulables (les reconstructions obsolètes sont abandonnées). 1 worker d'I/O à ajouter avec l'import STEP (lot 3) |
+| Stockage des documents | reprise de session garantie | **Fait** : IndexedDB (base `cao3`) + sauvegarde automatique différée de 1,5 s + reprise au démarrage + écran « Documents locaux » ; dégradation propre si le stockage est refusé |
 
 ---
 

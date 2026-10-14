@@ -11,6 +11,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // --------------------------------------------------------------------------- doublures
 
+/** État observable des doublures : c'est ce que les tests vérifient. */
+const kernelCalls = vi.hoisted(() => ({
+  initCalls: 0,
+  rebuildQualities: [] as string[],
+  restarts: 0,
+}));
+
 type AnyNode = Record<string, unknown> & { children: AnyNode[] };
 
 function konvaNode(attrs: Record<string, unknown> = {}): AnyNode {
@@ -122,23 +129,27 @@ vi.mock("@/cad/view/viewer", () => ({
 }));
 
 vi.mock("@/cad/kernel/client", () => ({
+  jsHeapBytes: () => 42 * 1024 * 1024,
   KernelClient: class {
     private listeners = new Set<(status: string) => void>();
     status = "ready";
-    initCalls = 0;
     rebuildCalls = 0;
     onStatus(listener: (status: string) => void): () => void {
       this.listeners.add(listener);
       listener(this.status);
       return () => this.listeners.delete(listener);
     }
+    onProgress(): () => void {
+      return () => undefined;
+    }
     async init(): Promise<void> {
-      this.initCalls += 1;
+      kernelCalls.initCalls += 1;
       this.status = "ready";
       for (const listener of this.listeners) listener("ready");
     }
     async rebuild(_document: unknown, quality: "preview" | "final") {
       this.rebuildCalls += 1;
+      kernelCalls.rebuildQualities.push(quality);
       return {
         revision: this.rebuildCalls,
         mesh: null,
@@ -146,6 +157,7 @@ vi.mock("@/cad/kernel/client", () => ({
         totalMs: 12,
         volume: 80000,
         messages: [],
+        heapBytes: 100 * 1024 * 1024,
         quality,
       };
     }
@@ -157,8 +169,9 @@ vi.mock("@/cad/kernel/client", () => ({
         byteLength: 8,
       };
     }
-    restart(): void {}
-    async restartKernel(): Promise<void> {}
+    async restart(): Promise<void> {
+      kernelCalls.restarts += 1;
+    }
   },
 }));
 
@@ -171,6 +184,31 @@ vi.mock("@/cad/kernel/solverClient", () => ({
     }
     terminate(): void {}
   },
+}));
+
+vi.mock("@/cad/io/storage", () => ({
+  isStorageAvailable: vi.fn(async () => true),
+  listDocuments: vi.fn(async () => [
+    { id: "doc_local_1", name: "Support moteur", updatedAt: 1_760_000_000_000, features: 3, bytes: 2048, volume: 42100 },
+  ]),
+  latestDocument: vi.fn(async () => null),
+  loadDocumentRecord: vi.fn(async () => ({
+    id: "doc_local_1",
+    name: "Support moteur",
+    updatedAt: 1_760_000_000_000,
+    features: 1,
+    bytes: 512,
+    volume: 100,
+    json: JSON.stringify({
+      schema: "cao3/document@1",
+      id: "doc_local_1",
+      name: "Support moteur",
+      units: { length: "mm", decimals: 2 },
+      features: [],
+    }),
+  })),
+  saveDocumentRecord: vi.fn(async () => true),
+  deleteDocumentRecord: vi.fn(async () => true),
 }));
 
 vi.mock("@/cad/io/download", () => ({
@@ -203,12 +241,25 @@ beforeAll(() => {
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.clearAllMocks();
+  kernelCalls.initCalls = 0;
+  kernelCalls.rebuildQualities = [];
+  kernelCalls.restarts = 0;
 });
 
 async function mountApp(): Promise<VueWrapper> {
   const wrapper = mount(App, { global: { plugins: [createPinia()] } });
-  await flushPromises();
+  await settle();
   return wrapper;
+}
+
+/**
+ * L'application diffère le démarrage du noyau jusqu'à la première image affichée
+ * (`requestAnimationFrame`) : les tests doivent laisser passer deux images, sinon le noyau
+ * n'est jamais initialisé. `flushPromises()` seul ne suffit pas (il ne vide que les micro-tâches).
+ */
+async function settle(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  await flushPromises();
 }
 
 function tabByTitle(wrapper: VueWrapper, title: string) {
@@ -375,6 +426,91 @@ describe("Écran principal", () => {
     // La reconstruction a été déclenchée par la nouvelle pièce
     expect(store.lastBuildMs).toBeGreaterThanOrEqual(0);
     expect(wrapper.text()).toContain("Bossage1");
+  });
+
+  it("affiche la progression réelle du téléchargement du noyau (chargement progressif)", async () => {
+    const wrapper = await mountApp();
+    const store = useCadStore();
+
+    store.kernelStatus = "loading";
+    store.loadProgress = { phase: "téléchargement du noyau", loaded: 5 * 1048576, total: 10 * 1048576, fraction: 0.5 };
+    await flushPromises();
+
+    const loader = wrapper.find(".loader");
+    expect(loader.exists()).toBe(true);
+    expect(loader.text()).toContain("50 %");
+    expect(loader.text()).toContain("5.0 Mo / 10.0 Mo");
+    expect(wrapper.find(".loader-bar i").attributes("style")).toContain("50%");
+  });
+
+  it("prévient avant la saturation mémoire et sait libérer la mémoire du noyau", async () => {
+    const wrapper = await mountApp();
+    const store = useCadStore();
+
+    expect(wrapper.find(".memory-banner").exists()).toBe(false);
+
+    // 1,1 Go de tas WASM : au-delà du seuil d'alerte.
+    store.memory.heapBytes = 1_100 * 1024 * 1024;
+    await flushPromises();
+    expect(store.memoryPressure).toBe("noyau");
+    const banner = wrapper.find(".memory-banner");
+    expect(banner.exists()).toBe(true);
+    expect(banner.text()).toContain("Libérer la mémoire");
+
+    await banner.find("button").trigger("click");
+    await flushPromises();
+    // Le worker fautif est tué : c'est la seule façon de récupérer le tas WASM.
+    expect(kernelCalls.restarts).toBe(1);
+    expect(store.memory.heapBytes).not.toBe(1_100 * 1024 * 1024);
+    expect(wrapper.find(".memory-banner").exists()).toBe(false);
+  });
+
+  it("allège la tessellation automatiquement au-delà du budget de triangles", async () => {
+    const wrapper = await mountApp();
+    const store = useCadStore();
+
+    // Maillage au-delà du budget : la qualité « finale » est rétrogradée en « aperçu ».
+    store.build = {
+      revision: 1,
+      mesh: { positions: new Float32Array(0), normals: new Float32Array(0), indices: new Uint32Array(0), faceIds: new Uint32Array(0), edgeLines: new Float32Array(0), edgeIds: new Uint32Array(0), triangleCount: 900_000 },
+      states: [],
+      totalMs: 20,
+      volume: 1000,
+      messages: [],
+      heapBytes: 100 * 1024 * 1024,
+    } as never;
+    await flushPromises();
+    expect(wrapper.find(".status").text()).toContain("900");
+
+    kernelCalls.rebuildQualities = [];
+    await store.rebuildNow();
+    // La qualité « finale » est rétrogradée en « aperçu » : le navigateur garde un maillage gérable.
+    expect(kernelCalls.rebuildQualities).toContain("preview");
+    expect(kernelCalls.rebuildQualities).not.toContain("final");
+  });
+
+  it("conserve le document dans le navigateur (IndexedDB) et sait le rouvrir", async () => {
+    const wrapper = await mountApp();
+    const store = useCadStore();
+
+    // Sauvegarde explicite depuis le ruban
+    await openTab(wrapper, "Fichier");
+    await clickCommand(wrapper, "Enregistrer en local");
+    expect(store.storage.available).toBe(true);
+    expect(store.storage.lastSavedAt).toBeGreaterThan(0);
+    expect(store.lastSavedLabel).toMatch(/^enregistré à \d{2}:\d{2}$/);
+
+    // Liste des documents locaux → reprise d'une pièce
+    await clickCommand(wrapper, "Documents locaux");
+    const modal = wrapper.findAll(".modal").find((m) => m.text().includes("Documents locaux"));
+    expect(modal).toBeDefined();
+    expect(modal!.text()).toContain("Support moteur");
+    expect(modal!.text()).toContain("IndexedDB");
+
+    await modal!.find(".doc-name").trigger("click");
+    await flushPromises();
+    expect(store.document.name).toBe("Support moteur");
+    expect(wrapper.findAll(".modal").find((m) => m.text().includes("Documents locaux"))).toBeUndefined();
   });
 
   it("traite TOUTES les commandes livrées du ruban (aucune commande non câblée)", async () => {

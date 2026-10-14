@@ -22,6 +22,21 @@ const kernelLabel = computed(() => {
 
 const kernelColor = computed(() => (store.kernelStatus === "ready" ? "var(--ok)" : store.kernelStatus === "error" ? "var(--error)" : "var(--warn)"));
 
+/** Mémoire : c'est le voyant qui prévient avant que le navigateur ne sature. */
+const memoryStatus = computed(() => {
+  const pressure = store.memoryPressure;
+  const label = store.memoryLabel;
+  if (pressure) return { text: `${label} ⚠`, color: "var(--warn)" };
+  return { text: label, color: "var(--text-dim)" };
+});
+
+const triangleStatus = computed(() => {
+  const count = store.triangles;
+  if (!count) return { text: "0 triangle", color: "var(--text-dim)" };
+  if (count > 1_000_000) return { text: `${(count / 1e6).toFixed(2)} M triangles ⚠`, color: "var(--warn)" };
+  return { text: `${count.toLocaleString("fr-FR")} triangles`, color: "var(--text-dim)" };
+});
+
 const sketchStatus = computed(() => {
   if (!store.activeSketchFeature) return null;
   if (store.sketchSession.conflicts.length) return { text: `Conflit de contraintes (${store.sketchSession.conflicts.length})`, color: "var(--error)" };
@@ -42,7 +57,13 @@ const sketchStatus = computed(() => {
     <span class="sep" />
     <span>Reconstruction : {{ store.lastBuildMs.toFixed(0) }} ms</span>
     <span class="sep" />
-    <span>{{ store.build?.mesh?.triangleCount ?? 0 }} triangles</span>
+    <span :style="{ color: store.storage.available ? 'var(--text-dim)' : 'var(--warn)' }" title="Document conservé dans la base du navigateur (IndexedDB)">
+      {{ store.lastSavedLabel }}
+    </span>
+    <span class="sep" />
+    <span :style="{ color: memoryStatus.color }" title="Mémoire du noyau WASM et de l'interface">{{ memoryStatus.text }}</span>
+    <span class="sep" />
+    <span :style="{ color: triangleStatus.color }" title="Budget de rendu : la tessellation est allégée automatiquement au-delà du seuil">{{ triangleStatus.text }}</span>
     <span class="sep" />
     <span v-if="store.build?.volume">{{ (store.build.volume / 1000).toFixed(3) }} cm³</span>
     <span v-else class="dim">volume —</span>

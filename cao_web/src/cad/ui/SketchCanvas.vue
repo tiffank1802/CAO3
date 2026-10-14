@@ -359,6 +359,7 @@ function onPointerMove(event: Konva.KonvaEventObject<PointerEvent>): void {
   hover = position;
 
   if (dragging?.kind === "pan") {
+    // Panoramique : la caméra bouge, la géométrie non — aucune reconstruction n'est demandée.
     const delta = { x: position.x - dragging.last.x, y: position.y - dragging.last.y };
     center.value = { x: center.value.x - delta.x, y: center.value.y - delta.y };
     dragging.last = position;
@@ -370,6 +371,8 @@ function onPointerMove(event: Konva.KonvaEventObject<PointerEvent>): void {
     const data = sketch.value;
     const point = data.points.find((p) => p.id === dragging!.id);
     if (point && !point.fixed) {
+      // Pendant le glissement : reconstruction en qualité d'aperçu (le final suit au relâchement).
+      store.setSketchDragging(true);
       const snapped = snap(position, false);
       point.x = snapped.point.x;
       point.y = snapped.point.y;
@@ -385,6 +388,7 @@ function onPointerMove(event: Konva.KonvaEventObject<PointerEvent>): void {
     if (entity && entity.kind === "circle") {
       const centerPoint = data.points.find((p) => p.id === entity.center);
       if (centerPoint) {
+        store.setSketchDragging(true);
         const radius = Math.max(0.5, Math.hypot(position.x - centerPoint.x, position.y - centerPoint.y));
         entity.radius = Math.round(radius * 100) / 100;
         store.scheduleSolve(30);
@@ -407,6 +411,8 @@ function onPointerUp(): void {
     return;
   }
   if (dragging?.kind === "point" || dragging?.kind === "radius") {
+    // Fin du glissement : on relâche l'aperçu et on reconstruit en qualité finale.
+    store.setSketchDragging(false);
     dragging = null;
     void store.solveSketchNow();
     return;

@@ -5,7 +5,7 @@
  */
 import { beforeAll, describe, expect, it } from "vitest";
 import * as R from "replicad";
-import { initKernel } from "@/cad/kernel/init";
+import { initKernel, kernelHeapBytes } from "@/cad/kernel/init";
 import { boxBetween, boxSafe, cutMany, draftScaleFactors, intersectSafe, loftSafe } from "@/cad/kernel/compat";
 import { buildShape, exportDocument, rebuildDocument } from "@/cad/kernel/rebuild";
 import { sketchToDrawing } from "@/cad/kernel/builders/sketch";
@@ -209,5 +209,134 @@ describe("solveur d'esquisse (planegcs)", () => {
     const result = solveSketch(sketch);
     expect(result.status).toBe(0);
     expect(result.dof).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// Mémoire : c'est le point qui fait « planter le navigateur » si on l'ignore. OpenCascade
+// ne rend jamais son tas WASM au système ; en revanche chaque forme est un objet que l'on
+// doit libérer explicitement, sinon le tas ne cesse de grossir au fil des reconstructions.
+// ---------------------------------------------------------------------------------------
+describe("Mémoire du noyau", () => {
+  function partWithHoles(): CadDocument {
+    const doc = createDocument("Memoire");
+    const sketch = createSketchFeature("Esquisse1");
+    addRectangleCentered(sketch.sketch, { x: 0, y: 0 }, 80, 50);
+    const extrude = createExtrudeFeature(sketch.id, "Bossage1");
+    doc.features.push(sketch, extrude);
+    const holeSketch = createSketchFeature("Esquisse2");
+    addCircleAt(holeSketch.sketch, { x: 0, y: 0 }, 6);
+    const hole = createExtrudeFeature(holeSketch.id, "Perçage1");
+    hole.operation = "cut";
+    doc.features.push(holeSketch, hole);
+    return doc;
+  }
+
+  it("expose la mémoire du noyau et la libère à chaque reconstruction", { timeout: 180_000 }, () => {
+    const doc = partWithHoles();
+
+    // Première passe : référence.
+    const first = rebuildDocument(doc, 1, "preview");
+    expect(first.volume).toBeCloseTo(80 * 50 * 20 - Math.PI * 36 * 20, -2);
+    expect(first.heapBytes).toBeGreaterThan(0);
+
+    // 30 reconstructions enchaînées : sans libération des formes, le tas WASM d'Emscripten
+    // grossit à chaque tour (l'ancienne géométrie n'est jamais rendue).
+    const samples: number[] = [];
+    const started = Date.now();
+    for (let i = 0; i < 30; i++) {
+      const result = rebuildDocument(doc, i + 2, "preview");
+      expect(result.volume).toBeCloseTo(first.volume as number, -2);
+      samples.push(result.heapBytes ?? 0);
+    }
+    const growth = samples[samples.length - 1] - first.heapBytes!;
+    const mb = (bytes: number) => (bytes / 1024 / 1024).toFixed(1);
+    // eslint-disable-next-line no-console -- mesure utile en cas d'échec
+    console.log(
+      `Tas WASM : départ ${mb(first.heapBytes!)} Mo → après 30 reconstructions ${mb(samples[samples.length - 1])} Mo ` +
+        `(Δ ${mb(growth)} Mo) en ${Date.now() - started} ms`,
+    );
+
+    // Le tas ne doit pas doubler en 30 reconstructions d'une même pièce.
+    expect(samples[samples.length - 1]).toBeLessThan(first.heapBytes! * 2);
+    expect(kernelHeapBytes()).toBe(samples[samples.length - 1]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// Budget de rendu : le maillage est un cache jetable. Sa taille et son coût doivent rester
+// bornés — c'est ce qui distingue « un peu de géométrie » de « le navigateur ne répond plus ».
+// ---------------------------------------------------------------------------------------
+describe("Budget de rendu", () => {
+  function partWithHoles(): CadDocument {
+    const doc = createDocument("Budget");
+    const sketch = createSketchFeature("Esquisse1");
+    addRectangleCentered(sketch.sketch, { x: 0, y: 0 }, 80, 50);
+    const extrude = createExtrudeFeature(sketch.id, "Bossage1");
+    doc.features.push(sketch, extrude);
+    const holeSketch = createSketchFeature("Esquisse2");
+    addCircleAt(holeSketch.sketch, { x: 18, y: 0 }, 6);
+    const hole = createExtrudeFeature(holeSketch.id, "Perçage1");
+    hole.operation = "cut";
+    doc.features.push(holeSketch, hole);
+    return doc;
+  }
+
+  it("la tessellation d'aperçu coûte au moins deux fois moins cher que la finale", () => {
+    const doc = partWithHoles();
+
+    const previewStarted = performance.now();
+    const preview = rebuildDocument(doc, 1, "preview");
+    const previewMs = performance.now() - previewStarted;
+
+    const finalStarted = performance.now();
+    const final = rebuildDocument(doc, 2, "final");
+    const finalMs = performance.now() - finalStarted;
+
+    const previewTriangles = preview.mesh?.triangleCount ?? 0;
+    const finalTriangles = final.mesh?.triangleCount ?? 0;
+    // eslint-disable-next-line no-console -- chiffres utiles (documentés dans PERFORMANCES_NAVIGATEUR.md)
+    console.log(
+      `Aperçu : ${previewTriangles} triangles en ${previewMs.toFixed(0)} ms · ` +
+        `Final : ${finalTriangles} triangles en ${finalMs.toFixed(0)} ms`,
+    );
+
+    expect(previewTriangles).toBeGreaterThan(0);
+    expect(finalTriangles).toBeGreaterThanOrEqual(previewTriangles);
+    expect(previewMs).toBeLessThan(finalMs * 2);
+    // Une pièce de ce type doit rester très en deçà du budget de 400 000 triangles.
+    expect(finalTriangles).toBeLessThan(50_000);
+  });
+
+  it("une pièce lourde (répétition d'outils) reste bornée en triangles et en mémoire", { timeout: 180_000 }, () => {
+    const doc = createDocument("AvecTrous");
+    const sketch = createSketchFeature("Esquisse1");
+    addRectangleCentered(sketch.sketch, { x: 0, y: 0 }, 200, 120);
+    const extrude = createExtrudeFeature(sketch.id, "Bossage1");
+    extrude.end = { kind: "blind", depth: 10, reverse: false, draftAngle: 0 };
+    doc.features.push(sketch, extrude);
+
+    // 12 perçages, chacun dans sa propre esquisse/fonction (comme le ferait l'utilisateur).
+    for (let i = 0; i < 12; i++) {
+      const holeSketch = createSketchFeature(`Esquisse${i + 2}`);
+      addCircleAt(holeSketch.sketch, { x: -80 + i * 14, y: i % 2 ? 30 : -30 }, 4);
+      const hole = createExtrudeFeature(holeSketch.id, `Perçage${i + 1}`);
+      hole.operation = "cut";
+      doc.features.push(holeSketch, hole);
+    }
+
+    const started = Date.now();
+    const result = rebuildDocument(doc, 1, "final");
+    const ms = Date.now() - started;
+    // eslint-disable-next-line no-console -- mesure de référence
+    console.log(
+      `13 fonctions (1 bossage + 12 perçages) : ${result.mesh?.triangleCount ?? 0} triangles, ` +
+        `${ms} ms, tas WASM ${((result.heapBytes ?? 0) / 1048576).toFixed(0)} Mo`,
+    );
+
+    expect(result.states.filter((s) => s.status === "error")).toHaveLength(0);
+    expect(result.volume).toBeCloseTo(200 * 120 * 10 - 12 * Math.PI * 16 * 10, -3);
+    expect(result.mesh!.triangleCount).toBeLessThan(400_000);
+    expect(ms).toBeLessThan(5000);
   });
 });

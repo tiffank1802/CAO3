@@ -7,6 +7,8 @@ panneau de commande contextuel (PropertyManager) et barre d'état.
 * **Plan et feuille de route** : [`../PLAN_CAO_REPLICAD.md`](../PLAN_CAO_REPLICAD.md)
 * **Spécification des rubans (169 commandes)** : [`../SPEC_RUBANS_FONCTIONS.md`](../SPEC_RUBANS_FONCTIONS.md)
 * **Constats noyau vérifiés + pièges** : [`../SPIKE_REPLICAD_FINDINGS.md`](../SPIKE_REPLICAD_FINDINGS.md)
+* **Performances et mémoire navigateur** : [`../PERFORMANCES_NAVIGATEUR.md`](../PERFORMANCES_NAVIGATEUR.md)
+* **Journal des décisions (ADR)** : [`DECISIONS.md`](DECISIONS.md)
 
 ---
 
@@ -16,7 +18,7 @@ panneau de commande contextuel (PropertyManager) et barre d'état.
 cd cao_web
 npm install          # récupère replicad, planegcs, three, konva, vue
 npm run dev          # http://localhost:5173
-npm test             # 23 tests : 16 noyau (Node) + 7 interface (jsdom)
+npm test             # 33 tests : 19 noyau (Node) + 3 stockage + 11 interface (jsdom)
 npm run typecheck    # vue-tsc
 npm run build        # bundle de production (WASM émis en assets hachés)
 ```
@@ -40,6 +42,8 @@ npm run build        # bundle de production (WASM émis en assets hachés)
 | **Interface** | ✅ rubans (Fichier, Esquisse, Fonctions, Assemblage, Mise en plan, Évaluation, Affichage, Outils), arbre avec compression/renommage/suppression, panneau de propriétés, barre d'état (noyau, solveur, durée de reconstruction, volume, triangles), historique Annuler/Rétablir |
 | **Premier contact** | ✅ « Fichier → Pièce de démonstration » (ou le bouton de l'arbre vide) charge une esquisse entièrement contrainte 80 × 50 et son bossage de 20 mm, prête à être modifiée |
 | **Échange de données** | ✅ export STEP et STL, document `.cao3.json` (enregistrer / ouvrir) |
+| **Persistance locale** | ✅ **IndexedDB** : sauvegarde automatique, reprise de session au démarrage, écran « Documents locaux » (lister / ouvrir / supprimer) — aucune donnée n'est envoyée sur le réseau |
+| **Ne pas saturer le navigateur** | ✅ progression réelle du téléchargement du noyau, LOD de tessellation (aperçu / final), plafond de 400 k triangles, alerte mémoire à 900 Mo, chien de garde de 20 s, action « Libérer la mémoire » (voir [`../PERFORMANCES_NAVIGATEUR.md`](../PERFORMANCES_NAVIGATEUR.md)) |
 | **Diagnostic** | ✅ « Outils → Diagnostic du noyau » : état du worker, avertissements, erreurs, redémarrage |
 
 ### Raccourcis clavier
@@ -48,6 +52,7 @@ npm run build        # bundle de production (WASM émis en assets hachés)
 |---|---|
 | `Ctrl+Z` / `Ctrl+Y` | Annuler / Rétablir |
 | `Ctrl+S` | Enregistrer le document (`.cao3.json`) |
+| — | *Fichier → Enregistrer en local* : copie du document dans IndexedDB (automatique après chaque modification également) |
 | `Ctrl+B` | Reconstruire |
 | `D` | Cotation intelligente (en esquisse) |
 | `L` / `R` / `C` | Ligne / Rectangle par centre / Cercle (en esquisse) |
@@ -79,11 +84,12 @@ src/
 │  ├─ view/        viewer.ts                                                       → three.js, picking face/arête
 │  ├─ ui/          RibbonBar · FeatureManager · PropertyManager · SketchCanvas · StatusBar · Icon
 │  │               ribbonDefs.ts                                                   → la carte des rubans
-│  └─ io/          download.ts
+│  └─ io/          download.ts · storage.ts (IndexedDB : documents locaux)
 ├─ App.vue         assemblage de l'écran + registre de commandes + raccourcis
 └─ main.ts
-tests/kernel.spec.ts   → 16 tests du noyau : pièges, esquisse→extrusion, export STEP, solveur
-tests/app.spec.ts      → 7 tests d'interface : rubans, panneaux, raccourcis, câblage des commandes
+tests/kernel.spec.ts   → 19 tests du noyau : pièges, esquisse→extrusion, export STEP, solveur, mémoire, budget de rendu
+tests/app.spec.ts      → 11 tests d'interface : rubans, panneaux, raccourcis, câblage des commandes, mémoire, IndexedDB
+tests/storage.spec.ts  → 3 tests du stockage local (IndexedDB) et de sa dégradation propre
 ```
 
 **Principes appliqués** (voir `PLAN_CAO_REPLICAD.md` §2) : le document JSON est la vérité, la géométrie est un cache ;
@@ -96,7 +102,8 @@ le maillage est jetable ; toute commande est annulable.
 
 | Suite | Environnement | Contenu |
 |---|---|---|
-| `tests/kernel.spec.ts` | Node | Le noyau OpenCascade s'exécute dans Node exactement comme dans le worker : pièges vérifiés (boîte à deux coins, intersection native, récupération après exception), chaîne esquisse → extrusion → tessellation, erreur de fonction non fatale, export STEP, solveur planegcs (degrés de liberté, conflits). |
+| `tests/storage.spec.ts` | Node + `fake-indexeddb` | Stockage local : enregistrement, relecture, liste ordonnée, suppression, et **dégradation propre** quand IndexedDB est refusé (navigation privée, quota). |
+| `tests/kernel.spec.ts` | Node | Le noyau OpenCascade s'exécute dans Node exactement comme dans le worker : pièges vérifiés (boîte à deux coins, intersection native, récupération après exception), chaîne esquisse → extrusion → tessellation, erreur de fonction non fatale, export STEP, solveur planegcs (degrés de liberté, conflits), **tas WASM stable sur 30 reconstructions**, budget de rendu (triangles et durées). |
 | `tests/app.spec.ts` | jsdom | Montage réel de l'écran : 8 onglets, convention « visible mais désactivé », ouverture/validation/annulation d'une esquisse, câblage du bossage, annuler/rétablir, enregistrement `.cao3.json`, styles et vues, pièce de démonstration, **et vérification que chaque commande livrée du ruban est traitée** (aucune commande « non disponible »). |
 
 > Ce test d'interface a immédiatement trouvé un défaut réel : les raccourcis clavier étaient définis mais **jamais enregistrés** (aucune touche ne fonctionnait). Corrigé dans `App.vue`.
