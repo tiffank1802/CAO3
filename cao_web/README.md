@@ -12,19 +12,66 @@ panneau de commande contextuel (PropertyManager) et barre d'état.
 
 ---
 
-## Démarrage
+## Démarrage (en local)
+
+### Prérequis
+
+| Élément | Exigence | Vérification |
+|---|---|---|
+| **Node.js** | **20.19+** ou **22.12+** (exigence de Vite 7 ; développement et tests faits en 22.22) | `node -v` |
+| npm | 10+ | `npm -v` |
+| Navigateur | Chrome / Edge / Firefox / Safari récents (WebGL 2, WebAssembly, Web Workers modules, IndexedDB) | — |
+
+Aucun backend, aucune base de données, aucun compte, aucune clé d'API. Node n'est utilisé que pour
+construire et servir les fichiers ; **rien ne s'exécute côté serveur**.
+
+### Les commandes
 
 ```bash
+git clone https://github.com/tiffank1802/CAO3.git
+cd CAO3
+git checkout arena/d139f6fc-cao3      # branche de travail (le lot 0+1 est dans la PR #1, pas encore sur main)
+
 cd cao_web
-npm install          # récupère replicad, planegcs, three, konva, vue
-npm run dev          # http://localhost:5173
-npm test             # 33 tests : 19 noyau (Node) + 3 stockage + 11 interface (jsdom)
-npm run typecheck    # vue-tsc
-npm run build        # bundle de production (WASM émis en assets hachés)
+npm install                           # ~200 Mo dans node_modules, aucun script de post-installation
+npm run dev                           # → http://localhost:5173
 ```
 
-> Le premier chargement télécharge ~7 Mo de WASM (OpenCascade). Ensuite tout est local :
-> aucune donnée ne quitte la machine, aucun backend n'est nécessaire.
+C'est tout : l'application s'ouvre sur une pièce vide, avec le bouton **« Charger la pièce de démonstration »**
+dans l'arbre (ou *Fichier → Pièce de démonstration*) pour voir immédiatement une esquisse contrainte et un bossage.
+
+### Les autres scripts
+
+| Commande | Ce qu'elle fait |
+|---|---|
+| `npm run dev` | Serveur de développement avec rechargement à chaud. Les WASM sont servis **depuis `node_modules`** (aucune copie, aucun script de synchronisation). |
+| `npm test` | 33 tests : 19 noyau (Node, mêmes chemins de code que le worker), 3 stockage (IndexedDB en mémoire), 11 interface (jsdom). ~4 s. |
+| `npm run typecheck` | `vue-tsc --noEmit`, aucun avertissement toléré. |
+| `npm run build` | Bundle de production dans `dist/` (WASM émis en assets hachés pour un cache long). |
+| `npm run preview` | Sert `dist/` comme le ferait un hébergeur — utile pour tester le build avant déploiement. |
+
+### À savoir au premier lancement
+
+* **22,9 Mo de WebAssembly** (OpenCascade) sont téléchargés **en local** au premier chargement, avec une
+  barre de progression réelle. Ensuite tout est en cache : plus aucune attente réseau.
+* `npm install` nécessite Internet **une fois** (registry npm). Après, l'application fonctionne **hors-ligne**,
+  à l'exception du Service Worker qui reste au lot 3.
+* Le document est conservé automatiquement dans **IndexedDB** (profil du navigateur) : fermer l'onglet ou
+  recharger la page ne perd rien. *Fichier → Documents locaux* permet de lister, rouvrir ou supprimer.
+* Le nœud du port : 5173 par défaut ; s'il est occupé, Vite en choisit un autre et l'affiche au démarrage.
+
+### En cas de problème
+
+| Symptôme | Cause probable / solution |
+|---|---|
+| Au lancement de Vite : `crypto.hash is not a function`, ou message `EBADENGINE` | Node trop ancien → installer **20.19+** ou **22.12+** (un `.nvmrc` est fourni : `nvm use`). |
+| `Failed to resolve import "replicad-opencascadejs/wasm?url"` | `npm install` incomplet → relancer `npm install` (le WASM vit dans `node_modules`). |
+| La barre de chargement du noyau reste à 0 % | Le réseau ou un proxy intercepte le flux. Le worker retombe automatiquement sur un téléchargement direct ; si cela persiste, vérifier qu'aucun bloqueur ne coupe les requêtes vers des fichiers `.wasm`. |
+| Page blanche dans la zone 3D | WebGL indisponible (pilote, machine virtuelle). Vérifier `chrome://gpu` ; l'esquisse 2D (Konva) fonctionne indépendamment. |
+| `Port 5173 is in use` | Rien à faire : Vite change de port sans échouer (`strictPort: false`). |
+| Déploiement derrière nginx/Apache : « `WebAssembly.instantiateStreaming failed` » | Le serveur doit servir les `.wasm` avec le type MIME **`application/wasm`** et autoriser les fichiers de ~23 Mo. |
+| Mémoire du navigateur qui grimpe | *Outils → Diagnostic du noyau → Libérer la mémoire* (ou le bandeau orange). Voir [`../PERFORMANCES_NAVIGATEUR.md`](../PERFORMANCES_NAVIGATEUR.md) §4. |
+| Repartir de zéro | *Fichier → Nouveau*, puis *Documents locaux → supprimer* ; ou vider le stockage du site dans le navigateur. |
 
 ---
 

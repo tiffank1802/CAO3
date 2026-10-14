@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "description": "CAO paramétrique web type SolidWorks — noyau OpenCascade (replicad) dans le navigateur",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
