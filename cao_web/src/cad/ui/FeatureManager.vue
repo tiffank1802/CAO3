@@ -81,7 +81,8 @@ function commitRename(): void {
         </span>
       </li>
       <li v-if="store.features.length === 0" class="tree-empty">
-        Aucune fonction. Créez une <strong>esquisse</strong> puis un <strong>bossage</strong>.
+        <p>Aucune fonction. Créez une <strong>esquisse</strong> puis un <strong>bossage</strong>.</p>
+        <button @click="store.loadDemoPart()">Charger la pièce de démonstration</button>
       </li>
     </ul>
 
@@ -97,6 +98,17 @@ function commitRename(): void {
 </template>
 
 <style scoped>
+.tree-empty p {
+  margin: 0 0 8px;
+}
+
+.tree-empty button {
+  padding: 5px 9px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--text);
+  border: 1px solid var(--accent);
+}
 .tree {
   display: flex;
   flex-direction: column;

@@ -37,6 +37,7 @@ export const RIBBON_TABS: RibbonTab[] = [
           { id: "file.new", label: "Nouveau", icon: "new", big: true, shortcut: "Ctrl+N" },
           { id: "file.open", label: "Ouvrir", icon: "open", big: true, shortcut: "Ctrl+O" },
           { id: "file.save", label: "Enregistrer", icon: "save", big: true, shortcut: "Ctrl+S" },
+          { id: "file.demo", label: "Pièce de démonstration", icon: "new" },
         ],
       },
       {

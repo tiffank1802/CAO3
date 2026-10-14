@@ -16,7 +16,7 @@ panneau de commande contextuel (PropertyManager) et barre d'état.
 cd cao_web
 npm install          # récupère replicad, planegcs, three, konva, vue
 npm run dev          # http://localhost:5173
-npm test             # 22 tests : 16 noyau (Node) + 6 interface (jsdom)
+npm test             # 23 tests : 16 noyau (Node) + 7 interface (jsdom)
 npm run typecheck    # vue-tsc
 npm run build        # bundle de production (WASM émis en assets hachés)
 ```
@@ -38,6 +38,7 @@ npm run build        # bundle de production (WASM émis en assets hachés)
 | **Fonctions 3D** | ✅ bossage extrudé (profondeur, sens, mode corps / enlèvement de matière) |
 | **Vue 3D** | ✅ three.js : styles (ombré + arêtes / ombré / filaire / transparence), vues standard, pré-sélection orange et sélection verte des faces et arêtes via `faceGroups`/`edgeGroups` |
 | **Interface** | ✅ rubans (Fichier, Esquisse, Fonctions, Assemblage, Mise en plan, Évaluation, Affichage, Outils), arbre avec compression/renommage/suppression, panneau de propriétés, barre d'état (noyau, solveur, durée de reconstruction, volume, triangles), historique Annuler/Rétablir |
+| **Premier contact** | ✅ « Fichier → Pièce de démonstration » (ou le bouton de l'arbre vide) charge une esquisse entièrement contrainte 80 × 50 et son bossage de 20 mm, prête à être modifiée |
 | **Échange de données** | ✅ export STEP et STL, document `.cao3.json` (enregistrer / ouvrir) |
 | **Diagnostic** | ✅ « Outils → Diagnostic du noyau » : état du worker, avertissements, erreurs, redémarrage |
 
@@ -82,7 +83,7 @@ src/
 ├─ App.vue         assemblage de l'écran + registre de commandes + raccourcis
 └─ main.ts
 tests/kernel.spec.ts   → 16 tests du noyau : pièges, esquisse→extrusion, export STEP, solveur
-tests/app.spec.ts      → 6 tests d'interface : rubans, panneaux, raccourcis, câblage des commandes
+tests/app.spec.ts      → 7 tests d'interface : rubans, panneaux, raccourcis, câblage des commandes
 ```
 
 **Principes appliqués** (voir `PLAN_CAO_REPLICAD.md` §2) : le document JSON est la vérité, la géométrie est un cache ;
@@ -96,7 +97,7 @@ le maillage est jetable ; toute commande est annulable.
 | Suite | Environnement | Contenu |
 |---|---|---|
 | `tests/kernel.spec.ts` | Node | Le noyau OpenCascade s'exécute dans Node exactement comme dans le worker : pièges vérifiés (boîte à deux coins, intersection native, récupération après exception), chaîne esquisse → extrusion → tessellation, erreur de fonction non fatale, export STEP, solveur planegcs (degrés de liberté, conflits). |
-| `tests/app.spec.ts` | jsdom | Montage réel de l'écran : 8 onglets, convention « visible mais désactivé », ouverture/validation/annulation d'une esquisse, câblage du bossage, annuler/rétablir, enregistrement `.cao3.json`, styles et vues, **et vérification que chaque commande livrée du ruban est traitée** (aucune commande « non disponible »). |
+| `tests/app.spec.ts` | jsdom | Montage réel de l'écran : 8 onglets, convention « visible mais désactivé », ouverture/validation/annulation d'une esquisse, câblage du bossage, annuler/rétablir, enregistrement `.cao3.json`, styles et vues, pièce de démonstration, **et vérification que chaque commande livrée du ruban est traitée** (aucune commande « non disponible »). |
 
 > Ce test d'interface a immédiatement trouvé un défaut réel : les raccourcis clavier étaient définis mais **jamais enregistrés** (aucune touche ne fonctionnait). Corrigé dans `App.vue`.
 

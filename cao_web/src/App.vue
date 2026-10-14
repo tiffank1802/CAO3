@@ -105,6 +105,11 @@ async function runCommand(id: string): Promise<void> {
       downloadText(store.serializeDocument(), `${store.document.name}.cao3.json`);
       notify("Document enregistré au format .cao3.json");
       return;
+    case "file.demo":
+      store.loadDemoPart();
+      viewer?.frameAll();
+      notify("Pièce de démonstration chargée : esquisse entièrement contrainte + bossage 20 mm");
+      return;
     case "file.export-step":
     case "file.export-stl": {
       const format = id.endsWith("step") ? ("step" as const) : ("stl" as const);

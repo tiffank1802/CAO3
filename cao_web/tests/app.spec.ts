@@ -186,6 +186,7 @@ import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import App from "@/App.vue";
 import { useCadStore } from "@/cad/core/documentStore";
+import { isSketchFeature } from "@/cad/core/types";
 import { RIBBON_TABS } from "@/cad/ui/ribbonDefs";
 import { downloadText } from "@/cad/io/download";
 
@@ -350,6 +351,30 @@ describe("Écran principal", () => {
     expect(store.viewStyle).toBe("wireframe");
     await clickCommand(wrapper, "Dessus");
     expect(store.view).toBe("top");
+  });
+
+  it("charge la pièce de démonstration : esquisse entièrement contrainte + bossage", async () => {
+    const wrapper = await mountApp();
+    const store = useCadStore();
+    expect(wrapper.text()).toContain("Charger la pièce de démonstration");
+
+    await openTab(wrapper, "Fichier");
+    await clickCommand(wrapper, "Pièce de démonstration");
+
+    expect(store.features.map((f) => f.type)).toEqual(["sketch", "extrude"]);
+    expect(store.document.name).toBe("Démonstration");
+
+    const sketch = store.features.find(isSketchFeature);
+    expect(sketch).toBeDefined();
+    // origine + 4 coins, 4 lignes, 4 contraintes H/V + 1 symétrie, 2 cotes
+    expect(sketch!.sketch.points).toHaveLength(5);
+    expect(sketch!.sketch.entities).toHaveLength(4);
+    expect(sketch!.sketch.constraints).toHaveLength(5);
+    expect(sketch!.sketch.dimensions.map((d) => d.value).sort((a, b) => a - b)).toEqual([50, 80]);
+
+    // La reconstruction a été déclenchée par la nouvelle pièce
+    expect(store.lastBuildMs).toBeGreaterThanOrEqual(0);
+    expect(wrapper.text()).toContain("Bossage1");
   });
 
   it("traite TOUTES les commandes livrées du ruban (aucune commande non câblée)", async () => {

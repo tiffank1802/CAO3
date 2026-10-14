@@ -11,7 +11,7 @@ import { newId } from "./ids";
 import { KernelClient, type KernelStatus } from "../kernel/client";
 import { SolverClient } from "../kernel/solverClient";
 import type { RebuildResult, SolveResult } from "../kernel/protocol";
-import { applySolveResult } from "../sketch/model";
+import { addRectangleCentered, applySolveResult } from "../sketch/model";
 
 export type ViewStyle = "shaded-edges" | "shaded" | "wireframe" | "transparent";
 export type ViewName = "iso" | "front" | "top" | "right";
@@ -379,6 +379,25 @@ export const useCadStore = defineStore("cad", () => {
     void solveSketchNow();
   }
 
+  /**
+   * Pièce de démonstration : une esquisse entièrement contrainte (rectangle 80 × 50 centré)
+   * et son bossage de 20 mm. Sert de premier contact — tout est modifiable et annulable.
+   */
+  function loadDemoPart(): void {
+    snapshot("pièce de démonstration");
+    const doc = createDocument("Démonstration");
+    const sketchFeature = createSketchFeature("Esquisse1");
+    addRectangleCentered(sketchFeature.sketch, { x: 0, y: 0 }, 80, 50);
+    const extrudeFeature = createExtrudeFeature(sketchFeature.id, "Bossage1");
+    doc.features.push(sketchFeature, extrudeFeature);
+    document.value = doc;
+    sketchSession.featureId = "";
+    sketchSession.selectedIds = [];
+    sketchSession.selectedDimensionId = null;
+    selection.value = { kind: "feature", id: extrudeFeature.id, label: extrudeFeature.name };
+    scheduleRebuild("final", 0);
+  }
+
   function newDocument(): void {
     snapshot("nouveau document");
     document.value = createDocument(`Pièce${newId("").length % 90 + 10}`);
@@ -460,6 +479,7 @@ export const useCadStore = defineStore("cad", () => {
     cancelCommand,
     commitCommand,
     newDocument,
+    loadDemoPart,
     loadDocument,
     serializeDocument,
     exportFile,
