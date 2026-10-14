@@ -32,9 +32,20 @@ git clone https://github.com/tiffank1802/CAO3.git
 cd CAO3
 git checkout arena/d139f6fc-cao3      # branche de travail (le lot 0+1 est dans la PR #1, pas encore sur main)
 
-cd cao_web
-npm install                           # ~200 Mo dans node_modules, aucun script de post-installation
+npm install                           # depuis la RACINE : délègue à cao_web et installe ses dépendances
 npm run dev                           # → http://localhost:5173
+```
+
+C'est le chemin le plus court. La racine ne contient pas l'application mais un `package.json` de délégation :
+`npm install` y installe **les dépendances de `cao_web/`** (`postinstall`), et `npm run dev|build|test|typecheck`
+exécutent le script correspondant dans `cao_web/`. `cao_frontend` et `cao_backend` ne sont pas touchés.
+
+Équivalent explicite, si vous préférez travailler directement dans le sous-dossier :
+
+```bash
+cd cao_web
+npm install
+npm run dev
 ```
 
 C'est tout : l'application s'ouvre sur une pièce vide, avec le bouton **« Charger la pièce de démonstration »**
@@ -49,6 +60,10 @@ dans l'arbre (ou *Fichier → Pièce de démonstration*) pour voir immédiatemen
 | `npm run typecheck` | `vue-tsc --noEmit`, aucun avertissement toléré. |
 | `npm run build` | Bundle de production dans `dist/` (WASM émis en assets hachés pour un cache long). |
 | `npm run preview` | Sert `dist/` comme le ferait un hébergeur — utile pour tester le build avant déploiement. |
+
+> **Erreur fréquente** : `npm install` à la racine se plaint de `Could not read package.json` sur les versions
+> antérieures au 2026-10-14 — l'application n'est pas à la racine mais dans `cao_web/`. C'est désormais pris en
+> charge : le `package.json` racine délègue. Sinon, `cd cao_web` d'abord.
 
 ### À savoir au premier lancement
 
@@ -70,6 +85,7 @@ dans l'arbre (ou *Fichier → Pièce de démonstration*) pour voir immédiatemen
 | Page blanche dans la zone 3D | WebGL indisponible (pilote, machine virtuelle). Vérifier `chrome://gpu` ; l'esquisse 2D (Konva) fonctionne indépendamment. |
 | `Port 5173 is in use` | Rien à faire : Vite change de port sans échouer (`strictPort: false`). |
 | Déploiement derrière nginx/Apache : « `WebAssembly.instantiateStreaming failed` » | Le serveur doit servir les `.wasm` avec le type MIME **`application/wasm`** et autoriser les fichiers de ~23 Mo. |
+| `npm error enoent … open '…/CAO3/package.json'` | Vous êtes à la racine du dépôt et l'application est dans `cao_web/` : `cd cao_web` puis `npm install` — ou utilisez le `package.json` de délégation à la racine (`npm install && npm run dev`). |
 | Mémoire du navigateur qui grimpe | *Outils → Diagnostic du noyau → Libérer la mémoire* (ou le bandeau orange). Voir [`../PERFORMANCES_NAVIGATEUR.md`](../PERFORMANCES_NAVIGATEUR.md) §4. |
 | Repartir de zéro | *Fichier → Nouveau*, puis *Documents locaux → supprimer* ; ou vider le stockage du site dans le navigateur. |
 

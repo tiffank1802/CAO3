@@ -20,6 +20,9 @@
 > | 🎛️ **[SPEC_RUBANS_FONCTIONS.md](SPEC_RUBANS_FONCTIONS.md)** | Spécification de chaque ruban et de chaque commande (169 commandes), états, raccourcis, interaction |
 > | 🔬 **[SPIKE_REPLICAD_FINDINGS.md](SPIKE_REPLICAD_FINDINGS.md)** | Rapport de vérification technique : capacités confirmées, 12 pièges mesurés et leurs contournements, benchmarks, rectificatif |
 >
+> ⚡ **Lancer l'application** (depuis la racine du dépôt) : `npm install` puis `npm run dev` → <http://localhost:5173>.
+> L'application vit dans **[`cao_web/`](cao_web/README.md)** ; `cao_frontend` et `cao_backend` sont les briques historiques, indépendantes.
+>
 > 🚀 **[PERFORMANCES_NAVIGATEUR.md](PERFORMANCES_NAVIGATEUR.md)** — comment l'application évite de saturer le navigateur (chargement en flux, LOD de tessellation, budget de mémoire, IndexedDB) : techniques des jeux en ligne appliquées à la CAO, **chiffres mesurés à l'appui**.
 >
 > L'application autonome correspondante est en cours de construction dans **[`cao_web/`](cao_web/README.md)** (Vue 3 + TypeScript + Vite, noyau OpenCascade WASM dans un worker, solveur planegcs) : rubans type SolidWorks, esquisse 2D contrainte, arbre de construction, export STEP/STL.
