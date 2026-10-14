@@ -8,7 +8,7 @@ import type { CadDocument, Feature, SketchData, SketchFeature } from "./types";
 import { findFeature, isExtrudeFeature, isSketchFeature } from "./types";
 import { createDocument, createExtrudeFeature, createSketchFeature, validateDocument } from "./registry";
 import { newId } from "./ids";
-import { jsHeapBytes, KernelClient, type KernelStatus } from "../kernel/client";
+import { jsHeapBytes, KernelClient, type KernelDiagnostics, type KernelStatus } from "../kernel/client";
 import { SolverClient } from "../kernel/solverClient";
 import type { RebuildResult, SolveResult } from "../kernel/protocol";
 import { addRectangleCentered, applySolveResult } from "../sketch/model";
@@ -62,6 +62,7 @@ export const useCadStore = defineStore("cad", () => {
   const document = ref<CadDocument>(createDocument("Pièce1"));
   const kernelStatus = ref<KernelStatus>("idle");
   const kernelDetail = ref<string>("");
+  const kernelInfo = ref<KernelDiagnostics>({ starts: 0, restarts: 0, source: "inconnu", loadMs: 0, initMs: 0, bytes: 0, heapBytes: null, at: 0 });
   const solverDetail = ref<string>("");
   const build = shallowRef<RebuildResult | null>(null);
   const buildError = ref<string>("");
@@ -143,6 +144,7 @@ export const useCadStore = defineStore("cad", () => {
 
   kernel.onStatus((status, detail) => {
     kernelStatus.value = status;
+    kernelInfo.value = kernel.diagnostics();
     if (detail) kernelDetail.value = detail;
     if (status === "ready") loadProgress.value = null;
     // Chaque redémarrage du worker rend toute la mémoire d'OpenCascade d'un coup :
@@ -440,6 +442,22 @@ export const useCadStore = defineStore("cad", () => {
     }
   }
 
+  /**
+   * Force un nouveau téléchargement du noyau (le cache local est ignoré). Utile après une mise
+   * à jour de l'application, ou si le stockage du navigateur a gardé une version incohérente.
+   */
+  async function redownloadKernel(): Promise<void> {
+    if (restartingKernel.value) return;
+    restartingKernel.value = true;
+    try {
+      await kernel.restart(true);
+      kernelInfo.value = kernel.diagnostics();
+      await rebuildNow();
+    } finally {
+      restartingKernel.value = false;
+    }
+  }
+
   /** Signale un glissement d'esquisse en cours (active la reconstruction d'aperçu). */
   function setSketchDragging(value: boolean): void {
     draggingSketch = value;
@@ -614,6 +632,7 @@ export const useCadStore = defineStore("cad", () => {
     sketchSession,
     kernelStatus,
     kernelDetail,
+    kernelInfo,
     solverDetail,
     build,
     buildError,
@@ -642,6 +661,7 @@ export const useCadStore = defineStore("cad", () => {
     refreshLocalDocuments,
     restartingKernel,
     releaseMemory,
+    redownloadKernel,
     setSketchDragging,
     undoStackSize: computed(() => undoStack.length),
     redoStackSize: computed(() => redoStack.length),

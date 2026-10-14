@@ -31,6 +31,9 @@ export interface KernelProgress {
   fraction: number | null;
 }
 
+/** D'où viennent les octets du noyau : cache local du navigateur ou réseau. */
+export type WasmSource = "cache" | "reseau";
+
 export interface RebuildResult {
   revision: number;
   mesh: MeshPayload | null;
@@ -66,7 +69,7 @@ export interface SolveResult {
 }
 
 export type KernelRequest =
-  | { id: number; kind: "init" }
+  | { id: number; kind: "init"; forceDownload?: boolean }
   | { id: number; kind: "rebuild"; document: CadDocument; revision: number; quality: "preview" | "final" }
   | { id: number; kind: "export"; document: CadDocument; format: "step" | "stl" }
   | { id: number; kind: "ping" };
@@ -75,7 +78,18 @@ export type SolverRequest = { id: number; kind: "solve"; sketch: SketchData };
 
 export type KernelResponse =
   | { id: number; ok: true; kind: "progress"; progress: KernelProgress }
-  | { id: number; ok: true; kind: "init"; version: string; ms: number; heapBytes: number | null }
+  | {
+      id: number;
+      ok: true;
+      kind: "init";
+      version: string;
+      ms: number;
+      heapBytes: number | null;
+      /** Origine des octets du noyau (cache local ou réseau). */
+      source: WasmSource;
+      bytes: number;
+      loadMs: number;
+    }
   | { id: number; ok: true; kind: "rebuild"; result: RebuildResult }
   | { id: number; ok: true; kind: "export"; result: ExportResult }
   | { id: number; ok: true; kind: "ping"; ms: number }

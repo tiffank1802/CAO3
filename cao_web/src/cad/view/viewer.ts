@@ -54,10 +54,10 @@ export class CadViewer {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(width, height);
-    this.renderer.setClearColor(0x1d2129, 1);
+    this.renderer.setClearColor(0xf6f8fc, 1);
     container.appendChild(this.renderer.domElement);
 
-    this.scene.background = new THREE.Color(0x1d2129);
+    this.scene.background = new THREE.Color(0xf6f8fc);
 
     this.camera = new THREE.PerspectiveCamera(45, width / height, 0.5, 20000);
     this.camera.up.set(0, 0, 1); // convention CAO : Z vers le haut
@@ -68,34 +68,36 @@ export class CadViewer {
     this.controls.dampingFactor = 0.12;
     this.controls.addEventListener("change", () => this.requestRender());
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
-    const key = new THREE.DirectionalLight(0xffffff, 1.15);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.95);
+    const key = new THREE.DirectionalLight(0xffffff, 1.05);
     key.position.set(200, -260, 400);
-    const fill = new THREE.DirectionalLight(0x9fb6ff, 0.35);
+    const fill = new THREE.DirectionalLight(0xc7d6ff, 0.35);
     fill.position.set(-300, 200, -180);
-    this.scene.add(ambient, key, fill);
+    const rim = new THREE.DirectionalLight(0xffffff, 0.25);
+    rim.position.set(-120, 320, -260);
+    this.scene.add(ambient, key, fill, rim);
 
-    this.grid = new THREE.GridHelper(400, 40, 0x3d444f, 0x2b3038);
+    this.grid = new THREE.GridHelper(400, 40, 0xc9d3e4, 0xe2e8f2);
     this.grid.rotation.x = Math.PI / 2;
     this.grid.position.z = -0.02;
     (this.grid.material as THREE.Material).transparent = true;
-    (this.grid.material as THREE.Material).opacity = 0.5;
+    (this.grid.material as THREE.Material).opacity = 0.9;
     this.scene.add(this.grid);
 
     this.axes = new THREE.AxesHelper(40);
     this.scene.add(this.axes);
 
     this.bodyMaterial = new THREE.MeshStandardMaterial({
-      color: 0xb9c3cf,
-      metalness: 0.15,
-      roughness: 0.55,
+      color: 0xccd6e5,
+      metalness: 0.3,
+      roughness: 0.38,
       side: THREE.DoubleSide,
     });
 
-    const highlightMaterial = new THREE.MeshBasicMaterial({ color: 0x39d353, side: THREE.DoubleSide, transparent: true, opacity: 0.85 });
+    const highlightMaterial = new THREE.MeshBasicMaterial({ color: 0x2c9c6a, side: THREE.DoubleSide, transparent: true, opacity: 0.72 });
     this.highlightMesh = new THREE.Mesh(new THREE.BufferGeometry(), highlightMaterial);
     this.highlightMesh.renderOrder = 3;
-    const preMaterial = new THREE.MeshBasicMaterial({ color: 0xffa726, side: THREE.DoubleSide, transparent: true, opacity: 0.7 });
+    const preMaterial = new THREE.MeshBasicMaterial({ color: 0xe08a3c, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
     this.preHighlightMesh = new THREE.Mesh(new THREE.BufferGeometry(), preMaterial);
     this.preHighlightMesh.renderOrder = 2;
     this.scene.add(this.highlightMesh, this.preHighlightMesh);
@@ -255,7 +257,7 @@ export class CadViewer {
     if (payload.edgeLines.length) {
       const edgeGeometry = new THREE.BufferGeometry();
       edgeGeometry.setAttribute("position", new THREE.BufferAttribute(payload.edgeLines, 3));
-      const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x10151c });
+      const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x5c6979 });
       this.edgeLines = new THREE.LineSegments(edgeGeometry, edgeMaterial);
       this.edgeLines.renderOrder = 1;
       this.scene.add(this.edgeLines);

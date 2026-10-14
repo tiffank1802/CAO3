@@ -106,8 +106,16 @@ dans l'arbre (ou *Fichier → Pièce de démonstration*) pour voir immédiatemen
 | **Premier contact** | ✅ « Fichier → Pièce de démonstration » (ou le bouton de l'arbre vide) charge une esquisse entièrement contrainte 80 × 50 et son bossage de 20 mm, prête à être modifiée |
 | **Échange de données** | ✅ export STEP et STL, document `.cao3.json` (enregistrer / ouvrir) |
 | **Persistance locale** | ✅ **IndexedDB** : sauvegarde automatique, reprise de session au démarrage, écran « Documents locaux » (lister / ouvrir / supprimer) — aucune donnée n'est envoyée sur le réseau |
-| **Ne pas saturer le navigateur** | ✅ progression réelle du téléchargement du noyau, LOD de tessellation (aperçu / final), plafond de 400 k triangles, alerte mémoire à 900 Mo, chien de garde de 20 s, action « Libérer la mémoire » (voir [`../PERFORMANCES_NAVIGATEUR.md`](../PERFORMANCES_NAVIGATEUR.md)) |
+| **Ne pas saturer le navigateur** | ✅ **noyau mis en cache une fois pour toutes** (Cache Storage : plus de retéléchargement à chaque rechargement), progression réelle au premier chargement, LOD de tessellation (aperçu / final), plafond de 400 k triangles, alerte mémoire à 900 Mo, chien de garde de 20 s, action « Libérer la mémoire » (voir [`../PERFORMANCES_NAVIGATEUR.md`](../PERFORMANCES_NAVIGATEUR.md)) |
+| **Thème clair « liquid glass »** | ✅ surfaces translucides (verre dépoli) sur fond pastel, texte ardoise et accents pâles ; scène 3D claire (pièce gris aluminium, arêtes franches) et plan d'esquisse blanc — toutes les couleurs passent par des jetons dans `styles/main.css` (voir ADR-012) |
 | **Diagnostic** | ✅ « Outils → Diagnostic du noyau » : état du worker, avertissements, erreurs, redémarrage |
+
+### Diagnostic du noyau
+
+*Outils → Diagnostic du noyau* affiche — entre autres — le **nombre de démarrages du noyau** et l'origine des
+octets (cache local ou réseau). Un seul démarrage par session est la normale ; le bouton
+**« Forcer le retéléchargement »** ignore le cache local (utile après une mise à jour de l'application), et
+**« Libérer la mémoire »** recycle le worker quand le navigateur approche de la saturation.
 
 ### Raccourcis clavier
 
@@ -153,6 +161,7 @@ src/
 tests/kernel.spec.ts   → 19 tests du noyau : pièges, esquisse→extrusion, export STEP, solveur, mémoire, budget de rendu
 tests/app.spec.ts      → 11 tests d'interface : rubans, panneaux, raccourcis, câblage des commandes, mémoire, IndexedDB
 tests/storage.spec.ts  → 3 tests du stockage local (IndexedDB) et de sa dégradation propre
+tests/wasmCache.spec.ts → 5 tests du cache du noyau (Cache Storage) : un seul téléchargement, progression, replis
 ```
 
 **Principes appliqués** (voir `PLAN_CAO_REPLICAD.md` §2) : le document JSON est la vérité, la géométrie est un cache ;

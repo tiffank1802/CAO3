@@ -20,6 +20,8 @@
 > | 🎛️ **[SPEC_RUBANS_FONCTIONS.md](SPEC_RUBANS_FONCTIONS.md)** | Spécification de chaque ruban et de chaque commande (169 commandes), états, raccourcis, interaction |
 > | 🔬 **[SPIKE_REPLICAD_FINDINGS.md](SPIKE_REPLICAD_FINDINGS.md)** | Rapport de vérification technique : capacités confirmées, 12 pièges mesurés et leurs contournements, benchmarks, rectificatif |
 >
+> 🎨 **Interface claire « liquid glass »** : surfaces de verre dépoli sur un fond pastel, scène 3D claire et plan d'esquisse blanc.
+>
 > ⚡ **Lancer l'application** (depuis la racine du dépôt) : `npm install` puis `npm run dev` → <http://localhost:5173>.
 > L'application vit dans **[`cao_web/`](cao_web/README.md)** ; `cao_frontend` et `cao_backend` sont les briques historiques, indépendantes.
 >

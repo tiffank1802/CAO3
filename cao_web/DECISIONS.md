@@ -17,6 +17,8 @@ Les décisions du projet historique (Django/CadQuery) restent dans [`../ARCHITEC
 | 009 | **Le worker du noyau est recyclé plutôt que « réparé »** (mémoire WASM non récupérable) | acceptée | moyen |
 | 010 | Budget de rendu : LOD aperçu/final + plafond de 400 k triangles | acceptée | facile |
 | 011 | Documents conservés dans IndexedDB (et non dans `localStorage` ou sur un serveur) | acceptée | moyen |
+| 012 | **Thème clair « liquid glass »** (verre dépoli sur fond pastel) plutôt qu'un thème sombre | acceptée | facile |
+| 013 | **Le noyau WebAssembly est mis en cache dans le Cache Storage** du navigateur | acceptée | facile |
 
 ---
 
@@ -202,3 +204,62 @@ chaque modification vers un serveur (hors périmètre, et une panne réseau ne d
 
 **Conséquences** : les pièces survivent aux plantages et à la fermeture de l'onglet ; aucun octet ne quitte
 la machine ; les gros artefacts (maillages, STEP) restent explicitement hors de la base car reconstructibles.
+
+---
+
+## ADR-012 — Thème clair « liquid glass »
+
+**Contexte** : la première version reprenait le thème sombre des logiciels de CAO industriels. La demande
+explicite est un **frontend clair** : blanc, couleurs pâles, « liquid glass ».
+
+**Décision** : surfaces **translucides** (verre dépoli) posées sur un fond pastel très diffus, texte ardoise,
+accents pâles. Techniquement : des jetons de design dans `styles/main.css` (fond, verre, texte, accents,
+couleurs de scène et d'esquisse), plus une classe globale `.glass`
+(`backdrop-filter: blur(22px) saturate(180%)` + bordure claire + ombre douce + liseré lumineux).
+
+* **Scène 3D** : fond blanc bleuté (`#f6f8fc`), grille pâle, pièce gris aluminium (`#ccd6e5`), arêtes
+  `#5c6979`, sélection vert doux, pré-sélection orange doux. Éclairage rééquilibré (ambiance 0,95 +
+  contre-jour) parce que sur fond clair les contrastes doivent venir des arêtes, pas des ombres.
+* **Esquisse 2D** : fond blanc, grille grise à repère (une ligne sur cinq renforcée), entités bleues tant
+  que l'esquisse n'est pas contrainte, ardoise une fois contrainte (convention SolidWorks conservée).
+* **Aucune couleur en dur dans les composants** : tout passe par les jetons, pour qu'un futur thème sombre
+  (ou un réglage utilisateur) soit un simple remplacement de `:root`.
+
+**Alternatives écartées** : garder le thème sombre (rejeté par l'utilisateur) ; « verre » sans fond coloré
+(sans nappe pastel à flouter, le verre devient du blanc terne et l'effet est invisible) ; thème clair plat
+sans transparence (moins lisible en surimpression des panneaux, et contraire à la demande).
+
+**Conséquences** : la lisibilité de la géométrie dépend désormais d'arêtes plus marquées et d'un gris franc
+pour la pièce ; l'effet de verre coûte un `backdrop-filter` par panneau (négligeable : 4 panneaux fixes),
+mais peut être désactivé sans conséquence (`--glass-blur: 0`) sur un appareil modeste.
+
+---
+
+## ADR-013 — Le noyau WebAssembly est mis en cache dans le Cache Storage
+
+**Contexte** : symptôme signalé — « le noyau WebAssembly bouge et recharge à chaque fois ». Diagnostic :
+en développement, Vite sert les fichiers de `node_modules` en `no-cache`, donc **les 22,98 Mo étaient
+retéléchargés et OpenCascade réinitialisé à chaque rechargement de page** ; s'y ajoutait un rechargement
+complet déclenché par la découverte tardive de dépendances à pré-optimiser (replicad, planegcs) — chaque
+rechargement tue le worker, donc le noyau.
+
+**Décision** :
+1. les octets du WASM sont rangés dans le **Cache Storage** du navigateur (API utilisable sans Service
+   Worker) puis donnés à Emscripten par `wasmBinary` : **zéro requête réseau** aux chargements suivants ;
+2. en développement, un en-tête `Cache-Control: public, max-age=31536000, immutable` est appliqué **aux
+   seuls fichiers `.wasm`** (le noyau ne change pas sans changement de version) ;
+3. les dépendances utilisées sont **déclarées** dans `optimizeDeps.include` pour que Vite ne déclenche
+   plus de rechargement en cours de session ;
+4. l'écran de chargement n'apparaît **qu'au-delà de 350 ms** : un noyau servi depuis le cache (~300 ms) ne
+   produit plus aucun clignotement ;
+5. le nombre de démarrages du noyau est **affiché** (Outils → Diagnostic) avec l'origine des octets
+   (cache local ou réseau) et un bouton « Forcer le retéléchargement ».
+
+**Alternatives écartées** : Service Worker (reporté au lot 3 : à valider dans un navigateur réel) ;
+laisser le navigateur gérer seul (insuffisant : `no-cache` en développement, et rien ne survit à une
+fermeture d'onglet en production) ; stocker le binaire dans IndexedDB (possible, mais le Cache Storage est
+exactement conçu pour des réponses HTTP et gère l'éviction pour nous).
+
+**Conséquences** : le redémarrage du noyau (mémoire, erreur fatale) redevient quasi instantané ; le premier
+chargement reste le seul coûteux ; le symptôme est désormais **mesurable** (compteur de démarrages) au lieu
+d'être une impression.

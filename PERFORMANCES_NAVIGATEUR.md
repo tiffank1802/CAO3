@@ -26,9 +26,12 @@ et **stocker localement** plutôt qu'en mémoire vive.
 
 | Mesure | Où | Détail |
 |---|---|---|
-| **Téléchargement en flux avec progression réelle** | `kernel/worker.ts` → `wasmSource()` | Le worker récupère le WASM avec `fetch` + `ReadableStream`, recompte les octets (une notification tous les 256 Ko), puis le présente à Emscripten par une URL `blob:` révoquée dès l'initialisation. L'écran affiche « 4,7 Mo / 22,9 Mo (21 %) » avec une barre de progression, au lieu d'un indicateur muet. |
-| **Repli systématique** | idem | Si le flux échoue (CSP, proxy, `blob:` interdit), on retombe sur l'URL d'origine : *le noyau doit toujours démarrer ; la progression est un confort, pas une condition*. |
+| **Téléchargement en flux avec progression réelle** | `kernel/wasmCache.ts` | Le worker récupère le WASM avec `fetch` + `ReadableStream`, recompte les octets (une notification tous les 256 Ko) et alimente une barre de progression « 4,7 Mo / 22,9 Mo (21 %) ». |
+| **Cache Storage : le WASM n'est téléchargé qu'une fois** | `kernel/wasmCache.ts` | Les octets sont rangés dans le cache du navigateur (cache `cao3-noyau-v1`) puis fournis à Emscripten par `wasmBinary`. Aux chargements suivants : **aucune requête réseau**, noyau prêt en ~300 ms. Indispensable parce que Vite sert `node_modules` en `no-cache` en développement. |
+| **Repli systématique** | idem | Si le cache est indisponible (navigation privée, contexte non sécurisé, quota) ou si la relecture échoue, on retombe sur le téléchargement : *le noyau doit toujours démarrer ; le cache est une optimisation, pas une condition*. |
 | **Le noyau démarre après la première image** | `App.vue` → `onMounted` | Le shell (rubans, arbre, panneaux) s'affiche **avant** que les 22,9 Mo ne commencent à descendre : la fenêtre ne reste jamais blanche. |
+| **Aucun clignotement quand le noyau vient du cache** | `App.vue` (`slowLoad`, 350 ms) | L'écran de chargement n'apparaît qu'au-delà de 350 ms d'attente : un démarrage depuis le cache (~300 ms) est totalement invisible. |
+| **Fin des rechargements de page intempestifs en développement** | `vite.config.ts` | Les dépendances sont déclarées (`optimizeDeps.include`) au lieu d'être découvertes en cours de session — chaque découverte déclenchait un rechargement complet, donc un redémarrage du noyau. Les `.wasm` reçoivent par ailleurs un cache long. |
 | **Solveur chargé à la demande** | `kernel/solverClient.ts` | Le worker du solveur (et ses 484 Ko de WASM) n'est créé qu'à la **première esquisse**. Un utilisateur qui ne fait que regarder une pièce ne les télécharge jamais. |
 | **Assets hachés → cache HTTP « immuable »** | `vite build` | Le WASM et les bundles sortent avec une empreinte dans le nom (`replicad_single-B_1cTsn_.wasm`) : le navigateur les garde indéfiniment, aucune revalidation réseau aux visites suivantes. |
 | **Aucun calcul serveur** | tout le projet | Il n'y a pas d'API à interroger : après le premier chargement, l'application fonctionne hors-ligne à l'exception des assets. |
@@ -141,6 +144,28 @@ assemblages (lot 5), avec un rendu par lots et des maillages partagés.
 
 ---
 
+## 5 bis. « Le noyau recharge à chaque fois » — diagnostic et réponse
+
+Symptôme signalé par l'utilisateur. Cause identifiée : **chaque rechargement de page réinitialisait
+OpenCascade**, pour deux raisons cumulées — Vite sert les fichiers de `node_modules` avec `no-cache`
+(22,98 Mo retéléchargés) et la découverte tardive de dépendances à pré-optimiser provoquait un
+rechargement complet supplémentaire.
+
+Réponse (ADR-013) : Cache Storage + `wasmBinary` (aucun réseau au second chargement), dépendances
+pré-déclarées (plus de rechargement en session), écran de chargement différé de 350 ms, et surtout un
+**compteur de démarrages visible** dans *Outils → Diagnostic du noyau* :
+
+```
+Démarrages du noyau : 3 démarrage(s) · dernier à 20:31:07 depuis le cache local (21.9 Mo, initialisé en 286 ms)
+```
+
+Un seul démarrage par session est la normale. Un compteur qui augmente à chaque action signale un
+rechargement de page ; après un redémarrage provoqué (mémoire ou erreur fatale), le noyau repart du cache
+local, sans réseau. Le bouton **« Forcer le retéléchargement »** récupère les octets depuis le serveur
+(utile après une mise à jour de l'application).
+
+---
+
 ## 6. Reproduire les mesures
 
 ```bash
@@ -166,6 +191,7 @@ conclusions sont citées ci-dessus. Le principe reste : **mesurer avant d'affirm
 | Streaming / decoupage / zones | Téléchargement en flux du WASM avec progression, démarrage après la première image, solveur chargé à la demande, assets hachés mis en cache | ✅ |
 | Gestion des zones non visibles | LOD de tessellation (aperçu/final), budget de 400 k triangles, culling matériel | ✅ |
 | IndexedDB | Documents locaux (`cao3`), sauvegarde automatique, reprise de session, liste/ouverture/suppression — avec dégradation propre | ✅ |
+| Cache Storage (API de stockage) | Noyau WebAssembly (22,98 Mo) mis en cache une fois pour toutes, instancié depuis les octets locaux ; compteur de démarrages et retéléchargement forcé dans le diagnostic | ✅ |
 | Service Workers | Pré-cache hors-ligne et intégrité du WASM | 🕒 lot 3 (à valider dans un navigateur) |
 | Textures compressées / audio léger | Maillages **non transportés** (recalculés), export STEP/STL en `Blob` direct, WASM 22,98 → 7,27 Mo gzip | ✅ |
 | Garbage collection | **Constat mesuré : le tas WASM ne se libère jamais.** Parades : chien de garde 20 s, recyclage du worker à un clic, alerte mémoire à 900 Mo, `delete()` systématique + purge des géométries GPU | ✅ |

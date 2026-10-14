@@ -31,7 +31,7 @@ function commitRename(): void {
 </script>
 
 <template>
-  <aside class="tree">
+  <aside class="tree glass">
     <header class="tree-head">
       <span>{{ store.document.name }}</span>
       <span class="tree-count">{{ store.features.length }} fonction(s)</span>
@@ -109,13 +109,14 @@ function commitRename(): void {
   color: var(--text);
   border: 1px solid var(--accent);
 }
-.tree {
+.tree.glass {
   display: flex;
   flex-direction: column;
-  background: var(--bg-panel);
-  border-right: 1px solid var(--border);
   min-width: 236px;
   max-width: 236px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.66);
 }
 
 .tree-head {
@@ -178,7 +179,7 @@ function commitRename(): void {
 }
 
 .tree-item:hover {
-  background: #242b35;
+  background: var(--pressed);
 }
 
 .tree-item.active {
@@ -246,10 +247,10 @@ function commitRename(): void {
 }
 
 .tree-error {
-  color: #ffb3ae;
+  color: var(--error);
 }
 
 .tree-warn {
-  color: #f0d08a;
+  color: var(--warn);
 }
 </style>

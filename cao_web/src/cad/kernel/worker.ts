@@ -3,9 +3,14 @@
  * Worker du noyau : c'est ICI que vit OpenCascade (principe P2).
  * Aucune exception ne doit remonter au thread UI : on répond toujours,
  * et une erreur fatale demande au client de redémarrer le worker (principe P6).
+ *
+ * Le WebAssembly est lu **depuis le cache local** quand il y est déjà (voir `wasmCache.ts`) :
+ * un rechargement de page ne coûte alors aucune requête réseau et le noyau redémarre
+ * quasi instantanément.
  */
 import ocWasmUrl from "replicad-opencascadejs/wasm?url";
 import { initKernel } from "./init";
+import { loadKernelWasm } from "./wasmCache";
 import { exportDocument, rebuildDocument } from "./rebuild";
 import type { KernelProgress, KernelRequest, KernelResponse } from "./protocol";
 
@@ -21,55 +26,36 @@ function reportProgress(phase: string, loaded: number, total: number | null): vo
   post({ id: 0, ok: true, kind: "progress", progress });
 }
 
-/**
- * Récupère le WASM en streaming pour afficher une progression réelle, puis le présente à
- * Emscripten par une URL `blob:` (la mémoire est libérée dès l'initialisation terminée).
- * En cas d'échec (CSP, absence de flux), on retombe simplement sur l'URL d'origine : le
- * noyau doit toujours pouvoir démarrer, la progression est un confort, pas une condition.
- */
-async function wasmSource(url: string): Promise<{ url: string; release: () => void }> {
-  try {
-    const response = await fetch(url);
-    if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
-    const header = response.headers.get("content-length");
-    const total = header ? Number(header) : null;
-    const reader = response.body.getReader();
-    const chunks: BlobPart[] = [];
-    let loaded = 0;
-    let lastReported = -1 << 30;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      chunks.push(value as unknown as BlobPart);
-      loaded += value.byteLength;
-      if (loaded - lastReported >= 256 * 1024) {
-        lastReported = loaded;
-        reportProgress("téléchargement du noyau", loaded, total);
-      }
-    }
-    reportProgress("téléchargement du noyau", loaded, total);
-    const objectUrl = URL.createObjectURL(new Blob(chunks, { type: "application/wasm" }));
-    return { url: objectUrl, release: () => URL.revokeObjectURL(objectUrl) };
-  } catch {
-    return { url, release: () => undefined };
-  }
-}
-
 async function handle(request: KernelRequest): Promise<{ response: KernelResponse; transfer: Transferable[] }> {
   switch (request.kind) {
     case "init": {
-      const source = await wasmSource(ocWasmUrl);
+      let loaded = await loadKernelWasm({
+        url: ocWasmUrl,
+        forceNetwork: request.forceDownload === true,
+        onProgress: (progress) => reportProgress(progress.phase, progress.loaded, progress.total),
+      });
+      reportProgress("initialisation d'OpenCascade", loaded.bytesLength, loaded.bytesLength);
       try {
-        reportProgress("initialisation d'OpenCascade", 0, null);
-        const info = await initKernel(() => source.url);
+        const info = await initKernel({ wasmBinary: loaded.bytes });
         kernelReady = true;
         return {
-          response: { id: request.id, ok: true, kind: "init", version: info.version, ms: info.ms, heapBytes: info.heapBytes },
+          response: {
+            id: request.id,
+            ok: true,
+            kind: "init",
+            version: info.version,
+            ms: info.ms,
+            heapBytes: info.heapBytes,
+            source: loaded.source,
+            bytes: loaded.bytesLength,
+            loadMs: loaded.ms,
+          },
           transfer: [],
         };
       } finally {
-        source.release();
+        // Les octets ont été copiés dans la mémoire WebAssembly : on relâche le tampon
+        // temporaire (23 Mo) au lieu de le garder pendant toute la session.
+        loaded = { ...loaded, bytes: new ArrayBuffer(0) };
       }
     }
     case "ping":

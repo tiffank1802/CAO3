@@ -5,11 +5,33 @@
  * - redémarrage automatique du worker après une erreur fatale (état OC corrompu).
  */
 import type { CadDocument } from "../core/types";
-import type { ExportResult, KernelProgress, KernelRequest, KernelResponse, RebuildResult } from "./protocol";
+import type { ExportResult, KernelProgress, KernelRequest, KernelResponse, RebuildResult, WasmSource } from "./protocol";
 
 export type KernelStatus = "idle" | "loading" | "ready" | "error" | "restarting";
 
 type StatusListener = (status: KernelStatus, detail?: string) => void;
+
+/**
+ * Journal des démarrages du noyau.
+ * C'est l'indicateur qui permet de répondre à « le noyau recharge-t-il à chaque fois ? » :
+ * un seul démarrage par session est la normale ; un compteur qui grimpe signale soit un
+ * rechargement de page (développement), soit un redémarrage provoqué (mémoire, erreur fatale).
+ */
+export interface KernelDiagnostics {
+  /** Nombre d'initialisations réussies d'OpenCascade depuis l'ouverture de la page. */
+  starts: number;
+  /** Dont provoquées par un redémarrage du worker (mémoire, erreur fatale). */
+  restarts: number;
+  /** Origine des octets du noyau au dernier démarrage. */
+  source: WasmSource | "inconnu";
+  /** Durée du dernier chargement (lecture du WASM) et de la dernière initialisation. */
+  loadMs: number;
+  initMs: number;
+  bytes: number;
+  heapBytes: number | null;
+  /** Horodatage du dernier démarrage. */
+  at: number;
+}
 type ProgressListener = (progress: KernelProgress) => void;
 
 /** Mémoire JavaScript du thread principal (Chrome uniquement) — pour le diagnostic. */
@@ -33,6 +55,16 @@ export class KernelClient {
   private initPromise: Promise<void> | null = null;
   private lastRebuild = 0;
   private restarting: Promise<void> | null = null;
+  private readonly stats: KernelDiagnostics = {
+    starts: 0,
+    restarts: 0,
+    source: "inconnu",
+    loadMs: 0,
+    initMs: 0,
+    bytes: 0,
+    heapBytes: null,
+    at: 0,
+  };
   /**
    * Durée au-delà de laquelle une reconstruction est considérée comme perdue.
    * Un calcul OpenCascade pathologique (des milliers d'arêtes) ne consomme pas seulement
@@ -59,6 +91,10 @@ export class KernelClient {
   private setStatus(status: KernelStatus, detail?: string): void {
     this.status = status;
     for (const listener of this.listeners) listener(status, detail);
+  }
+
+  diagnostics(): KernelDiagnostics {
+    return { ...this.stats };
   }
 
   private spawn(): Worker {
@@ -109,13 +145,27 @@ export class KernelClient {
     });
   }
 
-  async init(): Promise<void> {
+  async init(forceDownload = false): Promise<void> {
     if (this.initPromise) return this.initPromise;
     this.setStatus("loading");
     this.spawn();
-    this.initPromise = this.send<{ ms: number }>({ id: ++this.sequence, kind: "init" })
+    this.initPromise = this.send<{
+      ms: number;
+      source: WasmSource;
+      bytes: number;
+      loadMs: number;
+      heapBytes: number | null;
+    }>({ id: ++this.sequence, kind: "init", forceDownload })
       .then((response) => {
-        this.setStatus("ready", `noyau prêt (${Math.round(response.ms)} ms)`);
+        this.stats.starts += 1;
+        this.stats.source = response.source;
+        this.stats.loadMs = response.loadMs;
+        this.stats.initMs = response.ms;
+        this.stats.bytes = response.bytes;
+        this.stats.heapBytes = response.heapBytes;
+        this.stats.at = Date.now();
+        const origin = response.source === "cache" ? "cache local" : "réseau";
+        this.setStatus("ready", `noyau prêt en ${Math.round(response.ms)} ms (${origin})`);
       })
       .catch((error: Error) => {
         this.setStatus("error", error.message);
@@ -140,14 +190,15 @@ export class KernelClient {
     return this.send<ExportResult>({ id: ++this.sequence, kind: "export", document, format });
   }
 
-  /** Redémarre le worker (après une erreur fatale du noyau). */
-  async restart(): Promise<void> {
+  /** Redémarre le worker (après une erreur fatale, ou pour rendre la mémoire au système). */
+  async restart(forceDownload = false): Promise<void> {
+    this.stats.restarts += 1;
     this.setStatus("restarting");
     this.worker?.terminate();
     this.worker = null;
     this.pending.clear();
     this.initPromise = null;
-    await this.init();
+    await this.init(forceDownload);
   }
 
   /** Redémarrage silencieux : le worker fautif est tué et un noyau neuf prend sa place. */

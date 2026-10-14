@@ -22,6 +22,13 @@ const kernelLabel = computed(() => {
 
 const kernelColor = computed(() => (store.kernelStatus === "ready" ? "var(--ok)" : store.kernelStatus === "error" ? "var(--error)" : "var(--warn)"));
 
+/** Origine du noyau : « cache » = démarrage instantané, sans réseau. */
+const kernelOrigin = computed(() => {
+  const info = store.kernelInfo;
+  if (!info.starts) return "";
+  return info.source === "cache" ? " · cache local" : " · réseau";
+});
+
 /** Mémoire : c'est le voyant qui prévient avant que le navigateur ne sature. */
 const memoryStatus = computed(() => {
   const pressure = store.memoryPressure;
@@ -48,7 +55,7 @@ const sketchStatus = computed(() => {
 <template>
   <footer class="status">
     <span class="dot" :style="{ background: kernelColor }" />
-    <span>{{ kernelLabel }}</span>
+    <span :title="store.kernelDetail || undefined">{{ kernelLabel }}{{ kernelOrigin }}</span>
     <span class="sep" />
     <span>{{ store.document.units.length }}</span>
     <span class="sep" />
@@ -81,8 +88,11 @@ const sketchStatus = computed(() => {
   align-items: center;
   gap: 8px;
   padding: 4px 12px;
-  background: #171c23;
-  border-top: 1px solid var(--border);
+  background: var(--glass-strong);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  border-top: 1px solid var(--glass-line);
   font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;

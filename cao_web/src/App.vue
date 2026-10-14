@@ -26,6 +26,41 @@ const busyExport = ref(false);
 const solverText = computed(() => store.solverDetail || "worker dédié");
 const loadPercent = computed(() => `${Math.round((store.loadProgress?.fraction ?? 0) * 100)}%`);
 
+/**
+ * L'écran de chargement n'apparaît qu'au-delà de 350 ms.
+ * Quand le noyau vient du cache local (~300 ms), l'utilisateur ne voit donc **rien** :
+ * plus de clignotement à chaque rechargement.
+ */
+const slowLoad = ref(false);
+let slowLoadTimer: number | null = null;
+watch(
+  () => store.kernelStatus,
+  (status) => {
+    if (slowLoadTimer !== null) {
+      window.clearTimeout(slowLoadTimer);
+      slowLoadTimer = null;
+    }
+    if (status === "loading" || status === "restarting") {
+      slowLoadTimer = window.setTimeout(() => {
+        slowLoad.value = true;
+        slowLoadTimer = null;
+      }, 350);
+    } else {
+      slowLoad.value = false;
+    }
+  },
+  { immediate: true },
+);
+
+/** Résumé lisible du démarrage du noyau (diagnostic). */
+const kernelSummary = computed(() => {
+  const info = store.kernelInfo;
+  if (!info.starts) return "pas encore démarré";
+  const origin = info.source === "cache" ? "cache local" : "réseau";
+  const when = info.at ? new Date(info.at).toLocaleTimeString("fr-FR") : "—";
+  return `${info.starts} démarrage(s) · dernier à ${when} depuis le ${origin} (${(info.bytes / 1048576).toFixed(1)} Mo, initialisé en ${Math.round(info.initMs)} ms)`;
+});
+
 /** Attend la prochaine image affichée (avec repli si `requestAnimationFrame` n'existe pas). */
 function nextPaint(): Promise<void> {
   const raf: (callback: (time: number) => void) => void =
@@ -311,6 +346,11 @@ async function releaseMemory(): Promise<void> {
   notify(freed ? `Mémoire du noyau libérée (${(freed / 1048576).toFixed(0)} Mo) · noyau redémarré` : "Noyau redémarré");
 }
 
+async function redownloadKernel(): Promise<void> {
+  await withErrorGuard("Retéléchargement du noyau", () => store.redownloadKernel());
+  notify("Noyau retéléchargé et réinitialisé");
+}
+
 async function openLocal(id: string): Promise<void> {
   await withErrorGuard("Ouverture locale", () => store.openLocalDocument(id));
   showLocalDocuments.value = false;
@@ -336,7 +376,7 @@ function restartKernel(): void {
         <div v-if="store.activeSketchFeature" class="sketch-overlay">
           <SketchCanvas ref="sketchRef" />
         </div>
-        <div v-if="store.kernelStatus === 'loading'" class="viewport-overlay">
+        <div v-if="slowLoad" class="viewport-overlay">
           <div class="loader">
             <strong>Chargement du noyau OpenCascade</strong>
             <span v-if="store.loadProgress?.total">
@@ -409,6 +449,16 @@ function restartKernel(): void {
           <dd>{{ store.kernelStatus }} — {{ store.kernelDetail || "en attente" }}</dd>
           <dt>Noyau</dt>
           <dd>OpenCascade WASM via replicad 1.1.0</dd>
+          <dt>Démarrages du noyau</dt>
+          <dd>
+            {{ kernelSummary }}
+            <br />
+            <span class="diag-hint">
+              Un seul démarrage par session est la normale. Un compteur qui augmente à chaque action signale
+              un rechargement de page ; après un redémarrage provoqué (mémoire ou erreur), le noyau est
+              rechargé depuis le cache local, sans réseau.
+            </span>
+          </dd>
           <dt>Solveur</dt>
           <dd>planegcs 1.3.0 ({{ solverText }})</dd>
           <dt>Document</dt>
@@ -428,6 +478,7 @@ function restartKernel(): void {
           <button :disabled="store.restartingKernel" @click="releaseMemory">
             {{ store.restartingKernel ? "Libération…" : "Libérer la mémoire (redémarrer le noyau)" }}
           </button>
+          <button :disabled="store.restartingKernel" @click="redownloadKernel">Forcer le retéléchargement</button>
           <button @click="restartKernel">Redémarrer le noyau</button>
           <button class="primary" @click="showDiagnostics = false">Fermer</button>
         </footer>
@@ -446,6 +497,8 @@ function restartKernel(): void {
 .workspace {
   flex: 1;
   display: flex;
+  gap: 8px;
+  padding: 8px;
   min-height: 0;
 }
 
@@ -453,7 +506,12 @@ function restartKernel(): void {
   position: relative;
   flex: 1;
   min-width: 0;
-  background: #1d2129;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--viewport-bg);
+  background-image: var(--viewport-gradient);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), var(--glass-highlight);
 }
 
 .viewer-host {
@@ -464,7 +522,7 @@ function restartKernel(): void {
 .sketch-overlay {
   position: absolute;
   inset: 0;
-  background: #191d24;
+  background: var(--sketch-bg);
 }
 
 .loader-bar {
@@ -472,7 +530,7 @@ function restartKernel(): void {
   height: 5px;
   margin: 10px 0 6px;
   border-radius: 3px;
-  background: #2a323d;
+  background: rgba(23, 37, 63, 0.1);
   overflow: hidden;
 }
 
@@ -539,19 +597,22 @@ function restartKernel(): void {
   align-items: center;
   gap: 12px;
   padding: 7px 10px 7px 14px;
-  border-radius: 6px;
-  background: #4a2f16;
-  border: 1px solid var(--warn);
-  color: #ffd9a0;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 248, 235, 0.86);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  border: 1px solid rgba(196, 131, 42, 0.35);
+  color: #8a5a12;
   font-size: 12px;
+  box-shadow: var(--glass-shadow);
   z-index: 20;
 }
 
 .memory-banner button {
   padding: 5px 10px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--warn);
-  color: #1d2129;
+  color: #fff;
   font-weight: 600;
 }
 
@@ -566,7 +627,9 @@ function restartKernel(): void {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #14181ecc;
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
 
 .loader {
@@ -574,9 +637,12 @@ function restartKernel(): void {
   flex-direction: column;
   gap: 6px;
   padding: 16px 22px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--bg-panel);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  background: var(--glass-strong);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  box-shadow: var(--glass-shadow), var(--glass-highlight);
   text-align: center;
 }
 
@@ -590,9 +656,12 @@ function restartKernel(): void {
   bottom: 34px;
   left: 50%;
   transform: translateX(-50%);
-  background: #232a34;
-  border: 1px solid var(--accent);
-  border-radius: 6px;
+  background: var(--glass-strong);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--glass-shadow), var(--glass-highlight);
   padding: 8px 14px;
   font-size: 12px;
   z-index: 40;
@@ -604,9 +673,12 @@ function restartKernel(): void {
   bottom: 30px;
   font-size: 11px;
   color: var(--text-dim);
-  background: #1b2129;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  background: var(--glass-strong);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xs);
+  box-shadow: var(--glass-shadow-sm);
   padding: 4px 8px;
   z-index: 30;
   max-width: 340px;
@@ -615,7 +687,9 @@ function restartKernel(): void {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: #0b0e12cc;
+  background: rgba(30, 42, 58, 0.22);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -625,9 +699,12 @@ function restartKernel(): void {
 .modal {
   width: 560px;
   max-width: 92vw;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  background: var(--glass-strong);
+  backdrop-filter: blur(26px) saturate(180%);
+  -webkit-backdrop-filter: blur(26px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 60px rgba(23, 37, 63, 0.22), var(--glass-highlight);
   overflow: hidden;
 }
 
@@ -637,7 +714,7 @@ function restartKernel(): void {
   align-items: center;
   padding: 10px 14px;
   background: var(--bg-panel-alt);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--glass-line);
 }
 
 .modal h2 {
@@ -658,6 +735,14 @@ function restartKernel(): void {
   color: var(--text-dim);
 }
 
+.diag-hint {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .modal dd {
   margin: 0;
   word-break: break-word;
@@ -668,18 +753,25 @@ function restartKernel(): void {
   justify-content: flex-end;
   gap: 8px;
   padding: 10px 14px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--glass-line);
 }
 
 .modal button {
   padding: 6px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  background: var(--bg-panel-alt);
+  border: 1px solid var(--glass-line-strong);
+  border-radius: var(--radius-xs);
+  background: var(--glass-strong);
+  box-shadow: var(--glass-highlight);
+}
+
+.modal button:hover {
+  background: #fff;
 }
 
 .modal button.primary {
-  border-color: var(--accent);
+  border-color: var(--accent-line);
   background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
 }
 </style>

@@ -29,7 +29,7 @@ function isActiveTool(id: string): boolean {
 </script>
 
 <template>
-  <div class="ribbon">
+  <div class="ribbon glass">
     <div class="ribbon-tabs">
       <button
         v-for="tab in RIBBON_TABS"
@@ -70,9 +70,12 @@ function isActiveTool(id: string): boolean {
 </template>
 
 <style scoped>
-.ribbon {
+.ribbon.glass {
   background: var(--bg-ribbon);
-  border-bottom: 1px solid var(--border);
+  border: none;
+  border-bottom: 1px solid var(--glass-line);
+  border-radius: 0;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9), 0 8px 22px rgba(23, 37, 63, 0.07);
   user-select: none;
 }
 
@@ -81,8 +84,8 @@ function isActiveTool(id: string): boolean {
   align-items: center;
   gap: 2px;
   padding: 0 8px;
-  background: #1a1f27;
-  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel-alt);
+  border-bottom: 1px solid var(--glass-line);
 }
 
 .ribbon-tab {
@@ -91,15 +94,20 @@ function isActiveTool(id: string): boolean {
   border-bottom: 2px solid transparent;
 }
 
+.ribbon-tab {
+  border-radius: var(--radius-xs) var(--radius-xs) 0 0;
+}
+
 .ribbon-tab:hover {
   color: var(--text);
-  background: #212731;
+  background: var(--hover);
 }
 
 .ribbon-tab.active {
-  color: var(--text);
+  color: var(--accent);
   border-bottom-color: var(--accent);
-  background: var(--bg-ribbon);
+  background: rgba(255, 255, 255, 0.9);
+  font-weight: 600;
 }
 
 .ribbon-spacer {
@@ -154,16 +162,18 @@ function isActiveTool(id: string): boolean {
 }
 
 .ribbon-command:hover:not(.disabled) {
-  background: #333b49;
+  background: var(--hover);
+  box-shadow: var(--glass-shadow-sm);
 }
 
 .ribbon-command.active {
   background: var(--accent-soft);
-  outline: 1px solid var(--accent);
+  outline: 1px solid var(--accent-line);
+  box-shadow: var(--glass-highlight);
 }
 
 .ribbon-command.disabled {
-  opacity: 0.38;
+  opacity: 0.42;
   cursor: not-allowed;
 }
 

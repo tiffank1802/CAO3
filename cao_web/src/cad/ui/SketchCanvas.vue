@@ -42,7 +42,7 @@ let hover: Vec2 | null = null;
 
 const sketch = computed<SketchData | null>(() => store.activeSketchFeature?.sketch ?? null);
 const fullyConstrained = computed(() => store.sketchSession.dof === 0 && store.sketchSession.conflicts.length === 0);
-const entityColor = computed(() => (fullyConstrained.value ? "#e6ebf2" : "#4aa3ff"));
+const entityColor = computed(() => (fullyConstrained.value ? "#2b3648" : "#3a6ff0"));
 
 function toScreen(p: Vec2): Vec2 {
   return {
@@ -85,22 +85,24 @@ function drawGrid(): void {
   const bottomRight = toModel({ x: size.value.width, y: size.value.height });
   const firstX = Math.floor(topLeft.x / step) * step;
   const firstY = Math.floor(bottomRight.y / step) * step;
+  // Une ligne sur cinq est plus marquée : sur fond blanc, une grille uniforme devient illisible.
+  const gridColor = (value: number) => (Math.abs(value % (step * 5)) < 1e-6 ? "#d5dce8" : "#eceff6");
   for (let x = firstX; x <= bottomRight.x; x += step) {
     const from = toScreen({ x, y: bottomRight.y });
     const to = toScreen({ x, y: topLeft.y });
-    gridLayer.add(new Konva.Line({ points: [from.x, from.y, to.x, to.y], stroke: "#2a313b", strokeWidth: 1, listening: false }));
+    gridLayer.add(new Konva.Line({ points: [from.x, from.y, to.x, to.y], stroke: gridColor(x), strokeWidth: 1, listening: false }));
   }
   for (let y = firstY; y <= topLeft.y; y += step) {
     const from = toScreen({ x: topLeft.x, y });
     const to = toScreen({ x: bottomRight.x, y });
-    gridLayer.add(new Konva.Line({ points: [from.x, from.y, to.x, to.y], stroke: "#2a313b", strokeWidth: 1, listening: false }));
+    gridLayer.add(new Konva.Line({ points: [from.x, from.y, to.x, to.y], stroke: gridColor(y), strokeWidth: 1, listening: false }));
   }
   // Axes de l'esquisse
   const origin = toScreen({ x: 0, y: 0 });
-  gridLayer.add(new Konva.Line({ points: [0, origin.y, size.value.width, origin.y], stroke: "#5c3b3f", strokeWidth: 1.2, listening: false }));
-  gridLayer.add(new Konva.Line({ points: [origin.x, 0, origin.x, size.value.height], stroke: "#3b5340", strokeWidth: 1.2, listening: false }));
+  gridLayer.add(new Konva.Line({ points: [0, origin.y, size.value.width, origin.y], stroke: "#e0949a", strokeWidth: 1.2, listening: false }));
+  gridLayer.add(new Konva.Line({ points: [origin.x, 0, origin.x, size.value.height], stroke: "#8fc9a6", strokeWidth: 1.2, listening: false }));
   gridLayer.add(
-    new Konva.Text({ x: origin.x + 6, y: origin.y + 4, text: `${step} mm`, fill: "#5b6675", fontSize: 11, listening: false }),
+    new Konva.Text({ x: origin.x + 6, y: origin.y + 4, text: `${step} mm`, fill: "#94a3b8", fontSize: 11, listening: false }),
   );
 }
 
@@ -122,7 +124,7 @@ function drawGeometry(): void {
       geoLayer.add(
         new Konva.Line({
           points: [a.x, a.y, b.x, b.y],
-          stroke: isSelected ? "#39d353" : entityColor.value,
+          stroke: isSelected ? "#2c9c6a" : entityColor.value,
           strokeWidth: isSelected ? 2.6 : 2,
           hitStrokeWidth: 10,
           id: `entity:${entity.id}`,
@@ -137,7 +139,7 @@ function drawGeometry(): void {
       if (badges) {
         const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
         geoLayer.add(
-          new Konva.Text({ x: mid.x + 5, y: mid.y - 14, text: badges, fill: "#7d8b9e", fontSize: 11, listening: false }),
+          new Konva.Text({ x: mid.x + 5, y: mid.y - 14, text: badges, fill: "#7c8aa0", fontSize: 11, listening: false }),
         );
       }
     } else {
@@ -150,7 +152,7 @@ function drawGeometry(): void {
           x: c.x,
           y: c.y,
           radius: entity.radius * scale.value,
-          stroke: isSelected ? "#39d353" : entityColor.value,
+          stroke: isSelected ? "#2c9c6a" : entityColor.value,
           strokeWidth: isSelected ? 2.6 : 2,
           hitStrokeWidth: 10,
           id: `entity:${entity.id}`,
@@ -165,8 +167,8 @@ function drawGeometry(): void {
     const isOrigin = point.id === data.originId;
     const isSelected = selected.has(point.id);
     if (isOrigin) {
-      geoLayer.add(new Konva.Line({ points: [p.x - 7, p.y, p.x + 7, p.y], stroke: "#ff6b6b", strokeWidth: 1.4, listening: false }));
-      geoLayer.add(new Konva.Line({ points: [p.x, p.y - 7, p.x, p.y + 7], stroke: "#69db7c", strokeWidth: 1.4, listening: false }));
+      geoLayer.add(new Konva.Line({ points: [p.x - 7, p.y, p.x + 7, p.y], stroke: "#d05a55", strokeWidth: 1.4, listening: false }));
+      geoLayer.add(new Konva.Line({ points: [p.x, p.y - 7, p.x, p.y + 7], stroke: "#2c9c6a", strokeWidth: 1.4, listening: false }));
     }
     geoLayer.add(
       new Konva.Rect({
@@ -174,8 +176,8 @@ function drawGeometry(): void {
         y: p.y - 3.5,
         width: 7,
         height: 7,
-        fill: isSelected ? "#39d353" : point.fixed ? "#9aa7b8" : "#ffffff",
-        stroke: "#141821",
+        fill: isSelected ? "#2c9c6a" : point.fixed ? "#94a3b8" : "#ffffff",
+        stroke: "#2b3648",
         strokeWidth: 1,
         id: `point:${point.id}`,
       }),
@@ -205,7 +207,7 @@ function drawGeometry(): void {
       geoLayer.add(
         new Konva.Line({
           points: [a.x, a.y, b.x, b.y],
-          stroke: isConflict ? "#f85149" : "#8b98a9",
+          stroke: isConflict ? "#d05a55" : "#8ea0b8",
           strokeWidth: 1,
           dash: [4, 3],
           listening: false,
@@ -214,14 +216,14 @@ function drawGeometry(): void {
       label = `${dimension.value.toFixed(1)}`;
     }
     if (!anchor) continue;
-    const text = new Konva.Text({ text: label, fontSize: 12, fill: isConflict ? "#ffb3ae" : "#dfe6ef", padding: 3 });
+    const text = new Konva.Text({ text: label, fontSize: 12, fill: isConflict ? "#b0392f" : "#2b3648", padding: 3 });
     const group = new Konva.Group({ x: anchor.x, y: anchor.y - 18, id: `dimension:${dimension.id}` });
     group.add(
       new Konva.Rect({
         width: text.width() + 6,
         height: text.height() + 2,
-        fill: isConflict ? "#5a1f1c" : "#2b3441",
-        stroke: isConflict ? "#f85149" : "#48566a",
+        fill: isConflict ? "rgba(255, 235, 233, 0.95)" : "rgba(255, 255, 255, 0.88)",
+        stroke: isConflict ? "#d05a55" : "rgba(23, 37, 63, 0.18)",
         cornerRadius: 3,
       }),
     );
@@ -240,7 +242,7 @@ function drawOverlay(): void {
   if (draft) {
     const a = toScreen(draft.a);
     const b = toScreen(draft.b);
-    const stroke = "#ffa726";
+    const stroke = "#e08a3c";
     if (draft.tool === "circle") {
       overlayLayer.add(
         new Konva.Circle({ x: a.x, y: a.y, radius: Math.hypot(b.x - a.x, b.y - a.y), stroke, strokeWidth: 1.6, dash: [6, 4], listening: false }),
@@ -282,7 +284,7 @@ function drawOverlay(): void {
   }
   if (hover) {
     const h = toScreen(hover);
-    overlayLayer.add(new Konva.Rect({ x: h.x - 4, y: h.y - 4, width: 8, height: 8, stroke: "#ffa726", strokeWidth: 1, listening: false }));
+    overlayLayer.add(new Konva.Rect({ x: h.x - 4, y: h.y - 4, width: 8, height: 8, stroke: "#e08a3c", strokeWidth: 1, listening: false }));
   }
 }
 
@@ -625,7 +627,7 @@ watch(
   position: relative;
   width: 100%;
   height: 100%;
-  background: #191d24;
+  background: var(--sketch-bg);
 }
 
 .sketch-canvas {
@@ -652,7 +654,7 @@ watch(
 }
 
 .hud-chip {
-  background: #232a34;
+  background: var(--glass-strong);
   border: 1px solid var(--border-strong);
   border-radius: 10px;
   padding: 3px 9px;
@@ -662,10 +664,10 @@ watch(
 
 .hud-chip.error {
   border-color: var(--error);
-  color: #ffb3ae;
+  color: var(--error);
 }
 
 .hud-chip.hint {
-  color: #cbd5e1;
+  color: var(--text);
 }
 </style>

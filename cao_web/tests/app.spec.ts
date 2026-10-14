@@ -142,6 +142,18 @@ vi.mock("@/cad/kernel/client", () => ({
     onProgress(): () => void {
       return () => undefined;
     }
+    diagnostics() {
+      return {
+        starts: 1,
+        restarts: 0,
+        source: "cache",
+        loadMs: 55,
+        initMs: 280,
+        bytes: 22_980_267,
+        heapBytes: 100 * 1024 * 1024,
+        at: Date.now(),
+      };
+    }
     async init(): Promise<void> {
       kernelCalls.initCalls += 1;
       this.status = "ready";
@@ -277,6 +289,17 @@ function commandByLabel(wrapper: VueWrapper, label: string) {
   const button = wrapper.findAll(".ribbon-command").find((b) => b.text().includes(label));
   if (!button) throw new Error(`commande « ${label} » introuvable`);
   return button;
+}
+
+/** Ouvre une modale par son titre (modales empilées : on prend la dernière). */
+function modalWith(wrapper: VueWrapper, title: string) {
+  return wrapper.findAll(".modal").find((m) => m.text().includes(title));
+}
+
+/** Ouvre le diagnostic du noyau par le ruban (Outils). */
+async function showDiagnostics(wrapper: VueWrapper): Promise<void> {
+  await openTab(wrapper, "Outils");
+  await clickCommand(wrapper, "Diagnostic du noyau");
 }
 
 async function clickCommand(wrapper: VueWrapper, label: string): Promise<void> {
@@ -432,8 +455,11 @@ describe("Écran principal", () => {
     const wrapper = await mountApp();
     const store = useCadStore();
 
+    expect(wrapper.find(".loader").exists()).toBe(false); // pas de clignotement immédiat
+
     store.kernelStatus = "loading";
     store.loadProgress = { phase: "téléchargement du noyau", loaded: 5 * 1048576, total: 10 * 1048576, fraction: 0.5 };
+    await new Promise((resolve) => setTimeout(resolve, 400));
     await flushPromises();
 
     const loader = wrapper.find(".loader");
@@ -441,6 +467,44 @@ describe("Écran principal", () => {
     expect(loader.text()).toContain("50 %");
     expect(loader.text()).toContain("5.0 Mo / 10.0 Mo");
     expect(wrapper.find(".loader-bar i").attributes("style")).toContain("50%");
+  });
+
+  it("n'affiche pas d'écran de chargement quand le noyau vient du cache local", async () => {
+    const wrapper = await mountApp();
+    const store = useCadStore();
+
+    store.kernelStatus = "loading";
+    store.loadProgress = { phase: "noyau lu depuis le cache local", loaded: 23 * 1048576, total: 23 * 1048576, fraction: 1 };
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    store.kernelStatus = "ready";
+    await flushPromises();
+
+    // Le noyau a démarré en moins de 350 ms : rien n'a clignoté à l'écran.
+    expect(wrapper.find(".loader").exists()).toBe(false);
+  });
+
+  it("affiche le journal des démarrages du noyau (pour vérifier qu'il ne redémarre pas à chaque fois)", async () => {
+    const wrapper = await mountApp();
+    const store = useCadStore();
+
+    store.kernelInfo = {
+      starts: 3,
+      restarts: 1,
+      source: "cache",
+      loadMs: 60,
+      initMs: 280,
+      bytes: 22_980_267,
+      heapBytes: 100 * 1024 * 1024,
+      at: Date.now(),
+    };
+    await showDiagnostics(wrapper);
+
+    const modal = modalWith(wrapper, "Diagnostic du noyau");
+    expect(modal).toBeDefined();
+    expect(modal!.text()).toContain("3 démarrage(s)");
+    expect(modal!.text()).toContain("cache local");
+    expect(modal!.text()).toContain("21.9 Mo");
+    expect(modal!.text()).toContain("Forcer le retéléchargement");
   });
 
   it("prévient avant la saturation mémoire et sait libérer la mémoire du noyau", async () => {

@@ -89,7 +89,7 @@ function setSketchPlane(plane: "XY" | "XZ" | "YZ"): void {
 </script>
 
 <template>
-  <aside class="pm">
+  <aside class="pm glass">
     <!-- Commande en cours -->
     <template v-if="store.activeCommand">
       <header class="pm-head">
@@ -237,11 +237,12 @@ function setSketchPlane(plane: "XY" | "XZ" | "YZ"): void {
 </template>
 
 <style scoped>
-.pm {
+.pm.glass {
   display: flex;
   flex-direction: column;
-  background: var(--bg-panel);
-  border-left: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.66);
   min-width: 272px;
   max-width: 272px;
   overflow-y: auto;
@@ -282,7 +283,7 @@ function setSketchPlane(plane: "XY" | "XZ" | "YZ"): void {
   padding: 5px;
   border: 1px solid var(--border-strong);
   border-radius: 4px;
-  background: #12161c;
+  background: var(--glass-strong);
   color: var(--text-dim);
 }
 
@@ -315,14 +316,14 @@ function setSketchPlane(plane: "XY" | "XZ" | "YZ"): void {
 
 .pm-actions button.ok {
   border-color: #2ea043;
-  background: #17351f;
-  color: #c9f5d0;
+  background: var(--ok-soft);
+  color: var(--ok);
 }
 
 .pm-actions button.cancel {
   border-color: #7d3b39;
-  background: #2f1a1a;
-  color: #ffc9c4;
+  background: var(--error-soft);
+  color: var(--error);
 }
 
 .pm-stats {
@@ -335,7 +336,7 @@ function setSketchPlane(plane: "XY" | "XZ" | "YZ"): void {
   display: flex;
   justify-content: space-between;
   padding: 5px 7px;
-  background: #12161c;
+  background: var(--glass-strong);
   border: 1px solid var(--border);
   border-radius: 4px;
   font-size: 11px;
