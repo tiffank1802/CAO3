@@ -16,7 +16,12 @@ const kernelCalls = vi.hoisted(() => ({
   initCalls: 0,
   rebuildQualities: [] as string[],
   restarts: 0,
+  /** Maillage renvoyé par la doublure du noyau (null = aucune géométrie). */
+  mesh: null as unknown,
 }));
+
+/** Instances de la doublure de viewer : permet de vérifier ce qui est réellement affiché. */
+const viewerInstances = vi.hoisted(() => [] as { mesh: unknown; style: string }[]);
 
 type AnyNode = Record<string, unknown> & { children: AnyNode[] };
 
@@ -104,6 +109,9 @@ vi.mock("konva", () => {
 
 vi.mock("@/cad/view/viewer", () => ({
   CadViewer: class {
+    constructor() {
+      viewerInstances.push(this as unknown as { mesh: unknown; style: string });
+    }
     mesh: unknown = null;
     style = "shaded-edges";
     view = "iso";
@@ -164,7 +172,7 @@ vi.mock("@/cad/kernel/client", () => ({
       kernelCalls.rebuildQualities.push(quality);
       return {
         revision: this.rebuildCalls,
-        mesh: null,
+        mesh: kernelCalls.mesh,
         states: [],
         totalMs: 12,
         volume: 80000,
@@ -256,6 +264,8 @@ beforeEach(() => {
   kernelCalls.initCalls = 0;
   kernelCalls.rebuildQualities = [];
   kernelCalls.restarts = 0;
+  kernelCalls.mesh = null;
+  viewerInstances.length = 0;
 });
 
 async function mountApp(): Promise<VueWrapper> {
@@ -551,6 +561,35 @@ describe("Écran principal", () => {
     // La qualité « finale » est rétrogradée en « aperçu » : le navigateur garde un maillage gérable.
     expect(kernelCalls.rebuildQualities).toContain("preview");
     expect(kernelCalls.rebuildQualities).not.toContain("final");
+  });
+
+  it("affiche la pièce construite dans le viewer 3D (maillage transmis tel quel)", async () => {
+    const mesh = {
+      positions: new Float32Array([0, 0, 0, 10, 0, 0, 10, 10, 0, 0, 10, 0]),
+      normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
+      indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+      faceIds: new Uint32Array([1, 1]),
+      edgeLines: new Float32Array([0, 0, 0, 10, 0, 0]),
+      edgeIds: new Uint32Array([7]),
+      bbox: { min: [0, 0, 0] as [number, number, number], max: [10, 10, 0] as [number, number, number] },
+      triangleCount: 2,
+    };
+    kernelCalls.mesh = mesh;
+
+    const wrapper = await mountApp();
+    const store = useCadStore();
+    store.newDocument();
+    await store.rebuildNow();
+    await settle();
+
+    // Ce que le viewer a reçu : exactement le maillage du noyau (aucune enveloppe de protocole).
+    const viewer = viewerInstances.at(-1);
+    expect(viewer?.mesh, "le viewer n'a reçu aucun maillage").toBe(mesh);
+    expect(store.triangles).toBe(2);
+    // Le volume du corps (rapporté par la même réponse) remonte jusqu'au statut.
+    expect(store.build?.volume).toBe(80_000);
+    expect(store.build?.mesh).toBe(mesh);
+    expect(wrapper.find(".status").exists()).toBe(true);
   });
 
   it("conserve le document dans le navigateur (IndexedDB) et sait le rouvrir", async () => {

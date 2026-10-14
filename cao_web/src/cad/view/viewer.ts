@@ -44,6 +44,8 @@ export class CadViewer {
   private style: ViewStyle = "shaded-edges";
   private disposed = false;
   private hasFramed = false;
+  /** La taille du viewport suit la mise en page (ouverture/fermeture des panneaux). */
+  private resizeObserver: ResizeObserver | null = null;
 
   constructor(container: HTMLElement, callbacks: ViewerCallbacks = {}) {
     this.container = container;
@@ -108,6 +110,12 @@ export class CadViewer {
     this.renderer.domElement.addEventListener("pointermove", this.handlePointerMove);
     this.renderer.domElement.addEventListener("pointerdown", this.handlePointerDown);
     window.addEventListener("resize", this.handleResize);
+    // Sans cela, un changement de mise en page (panneau, ruban, fenêtre non redimensionnée)
+    // laisserait le canvas à son ancienne taille : l'image serait étirée, voire invisible.
+    if (typeof ResizeObserver !== "undefined") {
+      this.resizeObserver = new ResizeObserver(() => this.handleResize());
+      this.resizeObserver.observe(container);
+    }
     this.loop();
   }
 
@@ -128,7 +136,7 @@ export class CadViewer {
   private handleResize = (): void => {
     const width = this.container.clientWidth || 800;
     const height = this.container.clientHeight || 600;
-    this.renderer.setSize(width, height, false);
+    this.renderer.setSize(width, height, true);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.requestRender();
@@ -381,6 +389,8 @@ export class CadViewer {
 
   dispose(): void {
     this.disposed = true;
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     cancelAnimationFrame(this.animationFrame);
     window.removeEventListener("resize", this.handleResize);
     this.renderer.domElement.removeEventListener("pointermove", this.handlePointerMove);

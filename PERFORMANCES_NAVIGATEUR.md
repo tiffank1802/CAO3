@@ -164,12 +164,47 @@ rechargement de page ; après un redémarrage provoqué (mémoire ou erreur fata
 local, sans réseau. Le bouton **« Forcer le retéléchargement »** récupère les octets depuis le serveur
 (utile après une mise à jour de l'application).
 
+## 5 ter. « Les pièces n'apparaissent pas dans le viewer » — la cause était le protocole
+
+Second symptôme signalé le même jour, et il avait la même racine apparente : **la pièce créée ne s'affichait
+jamais**, ce qui poussait à recharger la page — d'où l'impression que « le noyau recharge au moment de
+l'affichage » (diagnostic mesuré : le compteur de démarrages n'augmente pas tout seul pendant une session).
+
+La production de géométrie était hors de cause : les tests du noyau mesuraient des volumes justes, et le
+maillage transféré par le worker était valide (tampons non vides, `structuredClone` avec la liste de
+transfert du worker → `tests/workerProtocol.spec.ts`).
+
+Le défaut était dans le **dépliage de l'enveloppe du protocole** : `KernelClient.rebuild()` renvoyait
+`{ id, ok, kind, result }` au lieu de `result`. Conséquences en cascade, toutes invisibles dans les tests
+précédents (qui appelaient le noyau en direct ou remplaçaient le client par une doublure) :
+
+| Ce que l'interface croyait | Ce qui se passait réellement |
+|---|---|
+| `build.mesh === undefined` | `viewer.setMesh(null)` à chaque reconstruction → viewer vide |
+| `build.volume === undefined` | volume jamais affiché dans l'arbre et le statut |
+| `heapBytes === undefined` | bannière de mémoire jamais déclenchée, LOD jamais rétrogradé |
+| `result.data === undefined` | export STEP/STL en échec sur `data.buffer` |
+
+Correctif (ADR-014) : un seul point de dépliage dans le client, deux garde-fous de forme, et un **test
+d'intégration qui exerce le vrai client avec le vrai module du worker** (`tests/kernelRpc.spec.ts`) — il
+échoue sans le correctif, il passe avec. Le même test verrouille la garantie de performance :
+
+```
+initialise le noyau, reconstruit une pièce et livre un maillage exploitable   ✓  triangleCount > 0, starts === 1
+exporte STEP et STL par le même chemin RPC                                    ✓  ISO-10303, 684 octets de STL
+enchaîne les reconstructions sans redémarrer le noyau                         ✓  6 reconstructions, starts === 1
+```
+
+Leçon générale, ajoutée aux règles : **toute frontière (worker, stockage, API) doit être testée par un test
+qui traverse la frontière réelle**, pas par une doublure qui imite une convention supposée.
+
 ---
 
 ## 6. Reproduire les mesures
 
 ```bash
-cd cao_web && npm test            # 33 tests : noyau (19), stockage (3), interface (11)
+cd cao_web && npm test            # 48 tests : noyau (19), stockage (3), interface (14),
+                                  # cache du noyau (5), protocole de maillage (4), chaîne client ↔ worker (3)
 
 # Chiffres affichés pendant les tests :
 #   Tas WASM : départ 100.0 Mo → après 30 reconstructions 100.0 Mo (Δ 0.0 Mo) en 7xx ms
@@ -211,3 +246,7 @@ conclusions sont citées ci-dessus. Le principe reste : **mesurer avant d'affirm
    regroupé (un seul booléen sur un `Compound`) et signalé dans l'interface.
 5. **Toute allocation lourde entre dans un budget affiché** (triangles, mémoire) plutôt que d'être silencieuse.
 6. **Aucun appel réseau pour des données utilisateur** : le document vit dans IndexedDB, les exports sur le disque.
+7. **Toute frontière est testée en la traversant réellement** : le client noyau dialoguait avec un worker
+   simulé qui imitait une convention *supposée*, et l'application affichait un viewer vide sans qu'aucun test
+   ne devienne rouge (ADR-014). Les tests `kernelRpc.spec.ts` (faux `Worker` + vrai module du worker) et
+   `workerProtocol.spec.ts` (transfert réel des tampons) sont la référence pour ce genre de frontière.

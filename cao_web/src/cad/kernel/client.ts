@@ -45,7 +45,15 @@ interface Pending {
   reject: (reason: Error) => void;
 }
 
+/**
+ * Fabrique de worker : par défaut un Web Worker réel (`worker.ts`), remplaçable dans les tests
+ * d'intégration pour exécuter le **même** module de worker sans navigateur.
+ */
+export type WorkerFactory = () => Worker;
+
 export class KernelClient {
+  constructor(private readonly workerFactory?: WorkerFactory) {}
+
   private worker: Worker | null = null;
   private sequence = 0;
   private pending = new Map<number, Pending>();
@@ -98,7 +106,9 @@ export class KernelClient {
   }
 
   private spawn(): Worker {
-    const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module", name: "cao-kernel" });
+    const worker = this.workerFactory
+      ? this.workerFactory()
+      : new Worker(new URL("./worker.ts", import.meta.url), { type: "module", name: "cao-kernel" });
     worker.onmessage = (event: MessageEvent<KernelResponse>) => {
       const response = event.data;
       if (response.ok && response.kind === "progress") {
@@ -109,7 +119,7 @@ export class KernelClient {
       if (!entry) return;
       this.pending.delete(response.id);
       if (response.ok) {
-        entry.resolve(response as never);
+        entry.resolve(this.unwrap(response));
       } else {
         entry.reject(new Error(response.error));
       }
@@ -122,6 +132,16 @@ export class KernelClient {
     };
     this.worker = worker;
     return worker;
+  }
+
+  /**
+   * Déplie l'enveloppe du protocole : le worker répond toujours
+   * `{ id, ok, kind, result }` (sauf `init`, dont les informations sont à la racine).
+   * Sans ce dépliage, l'interface recevrait l'enveloppe et `build.mesh` serait `undefined` —
+   * la pièce ne s'afficherait jamais. Le client solveur fait le même dépliage.
+   */
+  private unwrap(response: KernelResponse): never {
+    return ("result" in response ? response.result : response) as never;
   }
 
   private send<T>(request: KernelRequest, transfer: Transferable[] = [], timeoutMs = 0): Promise<T> {
@@ -182,12 +202,21 @@ export class KernelClient {
     this.lastRebuild = id;
     const response = await this.send<RebuildResult>({ id, kind: "rebuild", document, revision: id, quality }, [], this.watchdogMs);
     if (id !== this.lastRebuild) throw new Error("reconstruction obsolète");
+    if (!response || !Array.isArray(response.states)) {
+      throw new Error("réponse de reconstruction incomplète (protocole du noyau)");
+    }
     return response;
   }
 
   async exportFile(document: CadDocument, format: "step" | "stl"): Promise<ExportResult> {
     await this.init();
-    return this.send<ExportResult>({ id: ++this.sequence, kind: "export", document, format });
+    const result = await this.send<ExportResult>({ id: ++this.sequence, kind: "export", document, format });
+    // `byteLength` plutôt qu'un `instanceof` : un tampon issu d'un autre contexte (worker,
+    // environnement de test) n'est pas une instance du `Uint8Array` de cette fenêtre.
+    if (!result || !result.data || typeof result.data.byteLength !== "number") {
+      throw new Error("réponse d'export incomplète (protocole du noyau)");
+    }
+    return result;
   }
 
   /** Redémarre le worker (après une erreur fatale, ou pour rendre la mémoire au système). */

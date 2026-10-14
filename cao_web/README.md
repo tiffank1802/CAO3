@@ -56,7 +56,7 @@ dans l'arbre (ou *Fichier → Pièce de démonstration*) pour voir immédiatemen
 | Commande | Ce qu'elle fait |
 |---|---|
 | `npm run dev` | Serveur de développement avec rechargement à chaud. Les WASM sont servis **depuis `node_modules`** (aucune copie, aucun script de synchronisation). |
-| `npm test` | 33 tests : 19 noyau (Node, mêmes chemins de code que le worker), 3 stockage (IndexedDB en mémoire), 11 interface (jsdom). ~4 s. |
+| `npm test` | 48 tests : 19 noyau (Node, mêmes chemins de code que le worker), 3 stockage (IndexedDB en mémoire), 14 interface (jsdom), 5 cache du noyau, 4 protocole de maillage, 3 chaîne client ↔ worker (faux Worker exécutant le vrai module du worker). ~6 s. |
 | `npm run typecheck` | `vue-tsc --noEmit`, aucun avertissement toléré. |
 | `npm run build` | Bundle de production dans `dist/` (WASM émis en assets hachés pour un cache long). |
 | `npm run preview` | Sert `dist/` comme le ferait un hébergeur — utile pour tester le build avant déploiement. |
@@ -159,9 +159,12 @@ src/
 ├─ App.vue         assemblage de l'écran + registre de commandes + raccourcis
 └─ main.ts
 tests/kernel.spec.ts   → 19 tests du noyau : pièges, esquisse→extrusion, export STEP, solveur, mémoire, budget de rendu
-tests/app.spec.ts      → 11 tests d'interface : rubans, panneaux, raccourcis, câblage des commandes, mémoire, IndexedDB
+tests/app.spec.ts      → 14 tests d'interface : rubans, panneaux, raccourcis, câblage des commandes, pièce affichée dans le viewer, mémoire, IndexedDB
 tests/storage.spec.ts  → 3 tests du stockage local (IndexedDB) et de sa dégradation propre
 tests/wasmCache.spec.ts → 5 tests du cache du noyau (Cache Storage) : un seul téléchargement, progression, replis
+tests/workerProtocol.spec.ts → 4 tests du maillage tel qu'il circule (structuredClone + liste de transfert du worker)
+tests/kernelRpc.spec.ts → 3 tests de la chaîne **client ↔ worker** réelle (faux Worker exécutant le vrai module) :
+                          initialisation, reconstruction, export STEP/STL, enveloppe de protocole dépliée, aucun redémarrage intempestif
 ```
 
 **Principes appliqués** (voir `PLAN_CAO_REPLICAD.md` §2) : le document JSON est la vérité, la géométrie est un cache ;
@@ -176,7 +179,9 @@ le maillage est jetable ; toute commande est annulable.
 |---|---|---|
 | `tests/storage.spec.ts` | Node + `fake-indexeddb` | Stockage local : enregistrement, relecture, liste ordonnée, suppression, et **dégradation propre** quand IndexedDB est refusé (navigation privée, quota). |
 | `tests/kernel.spec.ts` | Node | Le noyau OpenCascade s'exécute dans Node exactement comme dans le worker : pièges vérifiés (boîte à deux coins, intersection native, récupération après exception), chaîne esquisse → extrusion → tessellation, erreur de fonction non fatale, export STEP, solveur planegcs (degrés de liberté, conflits), **tas WASM stable sur 30 reconstructions**, budget de rendu (triangles et durées). |
-| `tests/app.spec.ts` | jsdom | Montage réel de l'écran : 8 onglets, convention « visible mais désactivé », ouverture/validation/annulation d'une esquisse, câblage du bossage, annuler/rétablir, enregistrement `.cao3.json`, styles et vues, pièce de démonstration, **et vérification que chaque commande livrée du ruban est traitée** (aucune commande « non disponible »). |
+| `tests/app.spec.ts` | jsdom | Montage réel de l'écran : 8 onglets, convention « visible mais désactivé », ouverture/validation/annulation d'une esquisse, câblage du bossage, annuler/rétablir, enregistrement `.cao3.json`, styles et vues, pièce de démonstration, **transmission effective du maillage au viewer 3D**, **et vérification que chaque commande livrée du ruban est traitée** (aucune commande « non disponible »). |
+| `tests/workerProtocol.spec.ts` | Node | Le maillage tel qu'il traverse le worker : `structuredClone` avec la **liste de transfert exacte** du worker, pour une pièce créée par esquisse + bossage, une plaque percée, un document vide, en qualité aperçu et finale. |
+| `tests/kernelRpc.spec.ts` | jsdom | La chaîne **réellement utilisée par l'application** : le vrai `KernelClient` pilote le **vrai module du worker** à travers un faux `Worker` (transfert des tampons et `postMessage` compris). Vérifie que le client **déplie l'enveloppe du protocole** (`{ ok, kind, result }`) — le défaut qui empêchait les pièces de s'afficher —, que les tampons arrivent non vides, que l'export STEP/STL traverse le même chemin, et que six reconstructions ne démarrent le noyau **qu'une seule fois**. |
 
 > Ce test d'interface a immédiatement trouvé un défaut réel : les raccourcis clavier étaient définis mais **jamais enregistrés** (aucune touche ne fonctionnait). Corrigé dans `App.vue`.
 

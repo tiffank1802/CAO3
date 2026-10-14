@@ -263,3 +263,33 @@ exactement conçu pour des réponses HTTP et gère l'éviction pour nous).
 **Conséquences** : le redémarrage du noyau (mémoire, erreur fatale) redevient quasi instantané ; le premier
 chargement reste le seul coûteux ; le symptôme est désormais **mesurable** (compteur de démarrages) au lieu
 d'être une impression.
+
+---
+
+## ADR-014 — Le client déplie l'enveloppe du protocole (les pièces s'affichent enfin)
+
+**Contexte** : après la mise en cache du noyau, un défaut restait visible : **les pièces créées n'apparaissaient
+pas dans le viewer 3D** — ni la pièce de démonstration, ni une esquisse suivie d'un bossage. Le noyau travaillait
+(mesures de volume correctes côté tests), le maillage était produit, transféré et valide (voir
+`tests/workerProtocol.spec.ts`), et pourtant l'écran restait vide.
+
+**Cause** : le worker répond **toujours** par une enveloppe typée — `{ id, ok, kind, result }` — tandis que
+`KernelClient.rebuild()` renvoyait cette enveloppe **sans la déplier**, en la déclarant `RebuildResult`. Le store
+lisait donc `build.mesh`, c'est-à-dire `undefined` : le watcher d'`App.vue` appelait `viewer.setMesh(null)` à chaque
+reconstruction. Effets de bord du même défaut : le volume et la mémoire du noyau n'arrivaient jamais à l'interface,
+le LOD (rétrogradation en qualité « aperçu » au-delà de 400 000 triangles) ne se déclenchait jamais, et l'export
+STEP/STL échouait sur `result.data.buffer` (`undefined`) — donc, côté utilisateur, **tout se comportait comme si la
+pièce n'existait pas**, ce qui poussait à recharger la page : d'où l'impression que le noyau « rechargeait à
+l'affichage ».
+
+**Décision** :
+1. `KernelClient` **déplie l'enveloppe** dans un seul endroit (`unwrap()`), comme le faisait déjà `SolverClient` ;
+2. deux garde-fous vérifient la forme du résultat (`states` pour une reconstruction, `byteLength` pour un export)
+   et lèvent une erreur **lisible dans l'interface** plutôt que de laisser un viewer vide en silence ;
+3. un test d'intégration `tests/kernelRpc.spec.ts` fait dialoguer le **vrai client** avec le **vrai module du
+   worker** à travers un faux `Worker` (transfert compris) : il échouait avant le correctif, il passe après ;
+4. le même test vérifie qu'enchaîner les reconstructions ne démarre le noyau **qu'une seule fois** (`starts === 1`)
+   — la garantie « le noyau ne recharge pas à chaque affichage » est désormais **testée**, pas seulement affirmée.
+
+**Conséquences** : la pièce s'affiche dès la première reconstruction ; l'export STEP/STL fonctionne par le même
+chemin ; un décalage entre le protocole du worker et son client devient un test rouge au lieu d'un écran vide.
