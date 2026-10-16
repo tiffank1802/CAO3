@@ -1,0 +1,163 @@
+/**
+ * Thème « clair / liquid glass » — jetons de design.
+ *
+ * Principe : des surfaces **translucides** (verre dépoli) posées sur un fond pâle coloré.
+ * Le flou (`backdrop-filter`) et les bordures lumineuses donnent la profondeur ; les teintes
+ * restent pâles pour ne jamais concurrencer la géométrie affichée au centre.
+ */
+
+:root {
+  /* ------------------------------------------------------------------ fonds */
+  --bg-app: #eef1f8;
+  --bg-panel: rgba(255, 255, 255, 0.62);
+  --bg-panel-alt: rgba(255, 255, 255, 0.4);
+  --bg-ribbon: rgba(255, 255, 255, 0.58);
+
+  /* ------------------------------------------------------------------ verre */
+  --glass: rgba(255, 255, 255, 0.55);
+  --glass-strong: rgba(255, 255, 255, 0.78);
+  --glass-border: rgba(255, 255, 255, 0.9);
+  --glass-line: rgba(23, 37, 63, 0.08);
+  --glass-line-strong: rgba(23, 37, 63, 0.16);
+  --glass-blur: 22px;
+  --glass-shadow: 0 10px 30px rgba(23, 37, 63, 0.1);
+  --glass-shadow-sm: 0 4px 14px rgba(23, 37, 63, 0.08);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  --hover: rgba(255, 255, 255, 0.72);
+  --pressed: rgba(23, 37, 63, 0.06);
+
+  /* ------------------------------------------------------------------ texte */
+  --text: #1e2a3a;
+  --text-dim: #64748b;
+  --text-faint: #94a3b8;
+
+  /* ------------------------------------------------------------- accents pâles */
+  --accent: #4a76e8;
+  --accent-soft: rgba(74, 118, 232, 0.14);
+  --accent-line: rgba(74, 118, 232, 0.35);
+  --ok: #2c9c6a;
+  --ok-soft: rgba(44, 156, 106, 0.14);
+  --warn: #c4832a;
+  --warn-soft: rgba(196, 131, 42, 0.16);
+  --error: #d05a55;
+  --error-soft: rgba(208, 90, 85, 0.14);
+  --pre: #e08a3c;
+
+  /* ------------------------------------------------------------------ formes */
+  --radius: 14px;
+  --radius-sm: 9px;
+  --radius-xs: 6px;
+  --border: var(--glass-line);
+  --border-strong: var(--glass-line-strong);
+
+  /* --------------------------------------------------------- scène 3D (claire) */
+  --viewport-bg: #f6f8fc;
+  --viewport-gradient: linear-gradient(165deg, #ffffff 0%, #eef2f9 55%, #e6ecf6 100%);
+  --grid-major: #c9d3e4;
+  --grid-minor: #e2e8f2;
+  --edge-color: #5c6979;
+
+  /* ------------------------------------------------------- esquisse 2D (claire) */
+  --sketch-bg: #ffffff;
+  --sketch-grid: #e6ebf3;
+  --sketch-grid-strong: #d5dce8;
+  --sketch-entity: #3a6ff0;
+  --sketch-fixed: #2b3648;
+
+  --font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg-app);
+}
+
+/**
+ * Fond « aurora » : quelques nappes pastel très diffuses. C'est ce qui donne au verre
+ * quelque chose à flouter — sans fond coloré, le liquid glass se réduit à du blanc terne.
+ */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -20vmax;
+  z-index: -1;
+  background:
+    radial-gradient(38vmax 32vmax at 12% 8%, rgba(122, 160, 255, 0.42), transparent 62%),
+    radial-gradient(34vmax 30vmax at 88% 4%, rgba(255, 186, 214, 0.4), transparent 60%),
+    radial-gradient(40vmax 34vmax at 78% 92%, rgba(150, 226, 214, 0.42), transparent 62%),
+    radial-gradient(32vmax 30vmax at 6% 88%, rgba(255, 224, 168, 0.4), transparent 60%),
+    linear-gradient(160deg, #f4f7fd 0%, #eef2fa 50%, #f7f4fb 100%);
+  filter: blur(6px) saturate(115%);
+}
+
+/** Recette du verre, réutilisable par les composants (`class="... glass"`). */
+.glass {
+  background: var(--glass);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), var(--glass-highlight);
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+input,
+select {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text);
+  background: var(--glass-strong);
+  border: 1px solid var(--glass-line-strong);
+  border-radius: var(--radius-xs);
+  padding: 4px 6px;
+  width: 100%;
+  box-shadow: var(--glass-highlight);
+}
+
+input:focus,
+select:focus {
+  outline: 2px solid var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(23, 37, 63, 0.18);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(23, 37, 63, 0.3);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}

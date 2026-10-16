@@ -8,6 +8,31 @@
 
 ---
 
+> ### 🆕 Mise à jour du 2026-10-14 — Plan « CAO type SolidWorks » sur Replicad (noyau 100 % navigateur)
+>
+> Le projet évolue vers **une CAO paramétrique de type SolidWorks exécutée entièrement dans le navigateur** (OpenCascade WASM via `replicad`), avec rubans, arbre de construction, esquisses contraintes (planegcs), fonctions 3D avancées, assemblages et mise en plan.
+>
+> Trois documents pilotent cette nouvelle étape :
+>
+> | Document | Contenu |
+> |---|---|
+> | 🧭 **[PLAN_CAO_REPLICAD.md](PLAN_CAO_REPLICAD.md)** | Vision, architecture, modèle de document, moteur de reconstruction, nomenclature topologique, feuille de route par lots, performances, tests, risques |
+> | 🎛️ **[SPEC_RUBANS_FONCTIONS.md](SPEC_RUBANS_FONCTIONS.md)** | Spécification de chaque ruban et de chaque commande (169 commandes), états, raccourcis, interaction |
+> | 🔬 **[SPIKE_REPLICAD_FINDINGS.md](SPIKE_REPLICAD_FINDINGS.md)** | Rapport de vérification technique : capacités confirmées, 12 pièges mesurés et leurs contournements, benchmarks, rectificatif |
+>
+> 🎨 **Interface claire « liquid glass »** : surfaces de verre dépoli sur un fond pastel, scène 3D claire et plan d'esquisse blanc.
+>
+> ⚡ **Lancer l'application** (depuis la racine du dépôt) : `npm install` puis `npm run dev` → <http://localhost:5173>.
+> L'application vit dans **[`cao_web/`](cao_web/README.md)** ; `cao_frontend` et `cao_backend` sont les briques historiques, indépendantes.
+>
+> 🚀 **[PERFORMANCES_NAVIGATEUR.md](PERFORMANCES_NAVIGATEUR.md)** — comment l'application évite de saturer le navigateur (chargement en flux, LOD de tessellation, budget de mémoire, IndexedDB) : techniques des jeux en ligne appliquées à la CAO, **chiffres mesurés à l'appui**.
+>
+> L'application autonome correspondante est en cours de construction dans **[`cao_web/`](cao_web/README.md)** (Vue 3 + TypeScript + Vite, noyau OpenCascade WASM dans un worker, solveur planegcs) : rubans type SolidWorks, esquisse 2D contrainte, arbre de construction, export STEP/STL.
+>
+> Les documents ci-dessous (architecture Django/CadQuery, Event Sourcing, Cassowary) restent la référence historique pour la partie **persistance, comptes, projets et collaboration**, désormais optionnelle et sans aucun calcul géométrique côté serveur.
+
+---
+
 ## 🎯 Objectif
 
 Fournir une **architecture détaillée et approuvée** pour une application CAO web complète avec:

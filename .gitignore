@@ -1,0 +1,9 @@
+# Dépendances et artefacts de build (chaque sous-projet a aussi son propre .gitignore)
+node_modules/
+dist/
+coverage/
+
+# Divers
+.DS_Store
+*.local
+*.log
